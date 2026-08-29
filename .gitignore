@@ -2,10 +2,6 @@ Manifest.toml
 *.jl.cov
 *.jl.*.cov
 *.jl.mem
-/deps/*.so
-/deps/*.dylib
-/deps/*.dll
-/deps/*.stamp
-/deps/*.clap
 *.o
 /.dyadcache
+/deps/

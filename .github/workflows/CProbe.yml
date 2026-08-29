@@ -1,0 +1,30 @@
+# The C hosts, compiled and probed directly, with no Julia involved: the
+# same sources Yggdrasil builds into CLAPHost_jll / LV2Host_jll, and the
+# ones a generated standalone C program links. test/probe.c and
+# test/probe_lv2.c host the package's own test plugins and check arithmetic.
+name: C probes
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install lilv (for the LV2 host) and the LV2 example plugins
+        run: sudo apt-get update && sudo apt-get install -y liblilv-dev lv2-dev lv2-examples
+      - name: CLAP
+        run: |
+          cc -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -o ap_test.clap test/plugins/ap_test_plugins.c
+          cc -std=gnu99 -O2 -Wall -Wextra -o probe test/probe.c csrc/clap_host.c -ldl -lm
+          ./probe "$PWD/ap_test.clap" /lib/x86_64-linux-gnu/libm.so.6
+      - name: LV2
+        run: |
+          mkdir -p lv2/ap_test.lv2
+          cc -O2 -fPIC -shared -Wall -Wextra -o lv2/ap_test.lv2/ap_test.so test/plugins/ap_test_lv2.c
+          cp test/plugins/ap_test_lv2.ttl lv2/ap_test.lv2/ap_test.ttl
+          printf '@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n' > lv2/ap_test.lv2/manifest.ttl
+          for p in gain onepole lookahead; do printf '<urn:audioplugins:test:%s> a lv2:Plugin ; lv2:binary <ap_test.so> ; rdfs:seeAlso <ap_test.ttl> .\n' $p >> lv2/ap_test.lv2/manifest.ttl; done
+          cc -std=gnu99 -O2 -Wall -Wextra -o probe_lv2 test/probe_lv2.c csrc/lv2_host.c -Icsrc/vendor $(pkg-config --cflags --libs lilv-0) -lm
+          ./probe_lv2 "$PWD/lv2" /usr/lib/lv2

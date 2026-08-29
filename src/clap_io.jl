@@ -27,7 +27,7 @@
 # be called with the same ones the model was built against.
 
 
-export build_clap_host!, clap_scan, clap_open!, clap_close!,
+export build_clap_host!, clap_lib_path, clap_src_path, clap_scan, clap_open!, clap_close!,
        clap_is_open, clap_last_error, clap_plugin_name,
        clap_params, clap_param_count, clap_latency,
        clap_block_size, clap_sample_rate, clap_n_process, clap_reset_counters!,
@@ -35,13 +35,42 @@ export build_clap_host!, clap_scan, clap_open!, clap_close!,
        CLAP_WAVE_SILENCE, CLAP_WAVE_SINE, CLAP_WAVE_SQUARE,
        CLAP_WAVE_RAMP, CLAP_WAVE_IMPULSE
 
-const CLAP_SRC = normpath(joinpath(@__DIR__, "..", "csrc", "clap_host.c"))
-const CLAP_DIR = normpath(joinpath(@__DIR__, "..", "deps"))
+# The host library. `libclap_host` is what `ccall` needs: the JLL loads the
+# library in its `__init__` and this is the soname it is registered under,
+# so it is a compile-time constant that survives a relocated depot. The
+# absolute path -- what a generated C program links against -- is
+# `clap_lib_path()`, and the C source it was built from is `clap_src_path()`.
+using CLAPHost_jll: CLAPHost_jll, libclap_host
+using Scratch: @get_scratch!
 
-# The `ccall` library path must be a compile-time constant for the C backend to
-# link it statically, so it is fixed here and `build_clap_host!` writes to it.
-const CLAP_LIB = joinpath(CLAP_DIR,
-    "libclap_host." * (Sys.iswindows() ? "dll" : Sys.isapple() ? "dylib" : "so"))
+const CLAP_LIB = libclap_host
+const CLAP_SRC = normpath(joinpath(@__DIR__, "..", "csrc", "clap_host.c"))
+
+"""
+    clap_lib_path() -> String
+
+Absolute path of the prebuilt CLAP host library (from `CLAPHost_jll`). This is
+what a driver that links the host into a standalone program wants; Julia
+callers never need it because every `ccall` here goes through [`CLAP_LIB`].
+
+To run against a locally modified `csrc/clap_host.c` instead, build it with
+your C compiler and point the JLL at it through a preference:
+
+    using Preferences, CLAPHost_jll
+    set_preferences!(CLAPHost_jll, "libclap_host_path" => "/path/to/libclap_host.so")
+
+then restart Julia.
+"""
+clap_lib_path() = CLAPHost_jll.libclap_host_path::String
+
+"""
+    clap_src_path() -> String
+
+Path of `csrc/clap_host.c`, which ships with the package so that a generated
+standalone C program can link the host directly with no Julia present. The
+vendored CLAP headers it needs are next to it under `csrc/vendor/`.
+"""
+clap_src_path() = CLAP_SRC
 
 # Waveform codes for `clp_in_tone`, mirroring the CLAP_WAVE_* macros in
 # csrc/clap_host.h. Integers rather than strings because they are arguments to a
@@ -53,7 +82,7 @@ const CLAP_WAVE_SQUARE  = 2
 const CLAP_WAVE_RAMP    = 3
 const CLAP_WAVE_IMPULSE = 4
 
-"Path of a C compiler to build the shim with, or `nothing`."
+"Path of a C compiler to build the test plugins with, or `nothing`."
 function _c_compiler()
     for c in ("cc", "gcc", "clang")
         p = Sys.which(c)
@@ -62,55 +91,45 @@ function _c_compiler()
     return nothing
 end
 
-_clap_ready = false
-
 """
     build_clap_host!(; force = false)
 
-Compile `csrc/clap_host.c` to [`CLAP_LIB`]. CLAP is header-only and the plugin
-is `dlopen`ed at run time, so this needs nothing but a C compiler and `-ldl` --
-no C++ toolchain, no JLL, no system package.
+Deprecated. The host library is prebuilt and shipped by `CLAPHost_jll`, so
+there is nothing to build; this returns [`clap_lib_path`](@ref) for callers
+written against the 1.0 API. To work on the C source, see [`clap_lib_path`](@ref).
 """
 function build_clap_host!(; force::Bool = false)
-    global _clap_ready
-    mkpath(CLAP_DIR)
-    stamp = CLAP_LIB * ".stamp"
-    want = string(stat(CLAP_SRC).mtime)
-    if !force && isfile(CLAP_LIB) && isfile(stamp) && read(stamp, String) == want
-        _clap_ready = true
-        return CLAP_LIB
-    end
-    cc = _c_compiler()
-    cc === nothing && error("no C compiler found (tried cc, gcc, clang)")
-    run(`$cc -O2 -fPIC -shared -Wall -Wextra -o $CLAP_LIB $CLAP_SRC -ldl -lm`)
-    write(stamp, want)
-    _clap_ready = true
-    return CLAP_LIB
-end
-
-function ensure_clap()
-    _clap_ready || build_clap_host!()
-    return nothing
+    Base.depwarn("build_clap_host! is deprecated and a no-op: the CLAP host is shipped prebuilt by " *
+                 "CLAPHost_jll. Use clap_lib_path() for its location.", :build_clap_host!)
+    return clap_lib_path()
 end
 
 """
     clap_test_bundle(; force = false)
 
 Build the bundle of test plugins that ships with this package
-(`test/plugins/ap_test_plugins.c`: `dyad.gain`, `dyad.onepole`,
-`dyad.lookahead`) and return its path.
+(`test/plugins/ap_test_plugins.c`: `ap.gain`, `ap.onepole`, `ap.lookahead`)
+and return its path.
 
 Hosting is only proved by hosting something, and depending on a third-party
 plugin would make the suite depend on a binary whose arithmetic we cannot check
 and may not be able to fetch. These are ours, and their output is analytic.
+
+This is the one place the package needs a C compiler, and it is only needed
+to run the tests. The bundle is built into a per-package scratch space rather
+than into the package directory, so a read-only installation still works for
+hosting and fails here, at test time, with a message that says why.
 """
 function clap_test_bundle(; force::Bool = false)
     src = normpath(joinpath(@__DIR__, "..", "test", "plugins", "ap_test_plugins.c"))
-    out = joinpath(CLAP_DIR, "ap_test.clap")
-    mkpath(CLAP_DIR)
+    dir = @get_scratch!("test_plugins")
+    out = joinpath(dir, "ap_test.clap")
     if force || !isfile(out) || stat(src).mtime > stat(out).mtime
         cc = _c_compiler()
-        cc === nothing && error("no C compiler found (tried cc, gcc, clang)")
+        cc === nothing && error(
+            "clap_test_bundle: building the test plugins needs a C compiler on PATH " *
+            "(tried cc, gcc, clang). Hosting itself does not: the host library comes " *
+            "prebuilt from CLAPHost_jll.")
         run(`$cc -O2 -fPIC -shared -Wall -Wextra -o $out $src`)
     end
     return out
@@ -127,7 +146,6 @@ Enumerate a `.clap` bundle without instantiating anything. Throws with the
 host's own message when the bundle cannot be loaded.
 """
 function clap_scan(path::AbstractString)
-    ensure_clap()
     n = ccall((:clap_host_scan, CLAP_LIB), Clong, (Cstring,), path)
     n < 0 && error("clap_scan($(repr(path))) failed: $(clap_last_error())")
     return [(id = unsafe_string(ccall((:clap_host_scan_id, CLAP_LIB), Cstring, (Clong,), i)),
@@ -148,7 +166,6 @@ each tick carries, or the stream is not contiguous.
 function clap_open!(path::AbstractString; plugin_id::AbstractString = "",
                     sample_rate::Real = 48000, block_size::Integer = 512,
                     channels::Integer = 1)
-    ensure_clap()
     r = ccall((:clap_host_open, CLAP_LIB), Cint,
               (Cstring, Cstring, Cdouble, Cdouble, Cdouble),
               path, plugin_id, sample_rate, block_size, channels)
@@ -158,18 +175,17 @@ end
 
 "Deactivate, destroy and unload. Safe when nothing is open."
 function clap_close!()
-    ensure_clap()
     ccall((:clap_host_close, CLAP_LIB), Cvoid, ())
     return nothing
 end
 
-clap_last_error()  = (ensure_clap(); unsafe_string(ccall((:clap_host_last_error, CLAP_LIB), Cstring, ())))
-clap_plugin_name() = (ensure_clap(); unsafe_string(ccall((:clap_host_plugin_name, CLAP_LIB), Cstring, ())))
-clap_is_open()     = (ensure_clap(); ccall((:clap_host_is_open, CLAP_LIB), Cdouble, ()) > 0.5)
-clap_block_size()  = (ensure_clap(); Int(ccall((:clap_host_block_size, CLAP_LIB), Cdouble, ())))
-clap_sample_rate() = (ensure_clap(); ccall((:clap_host_sample_rate, CLAP_LIB), Cdouble, ()))
-clap_n_process()   = (ensure_clap(); ccall((:clap_host_n_process, CLAP_LIB), Clong, ()))
-clap_param_count() = (ensure_clap(); ccall((:clap_host_n_params, CLAP_LIB), Clong, ()))
+clap_last_error()  = unsafe_string(ccall((:clap_host_last_error, CLAP_LIB), Cstring, ()))
+clap_plugin_name() = unsafe_string(ccall((:clap_host_plugin_name, CLAP_LIB), Cstring, ()))
+clap_is_open()     = ccall((:clap_host_is_open, CLAP_LIB), Cdouble, ()) > 0.5
+clap_block_size()  = Int(ccall((:clap_host_block_size, CLAP_LIB), Cdouble, ()))
+clap_sample_rate() = ccall((:clap_host_sample_rate, CLAP_LIB), Cdouble, ())
+clap_n_process()   = ccall((:clap_host_n_process, CLAP_LIB), Clong, ())
+clap_param_count() = ccall((:clap_host_n_params, CLAP_LIB), Clong, ())
 
 """
     clap_latency() -> Float64
@@ -178,10 +194,9 @@ Latency the plugin reports, in samples. **Not compensated** — hosting a
 lookahead plugin leaves its output shifted by this many samples relative to the
 input, and a model that cares must align downstream itself.
 """
-clap_latency() = (ensure_clap(); ccall((:clap_host_latency, CLAP_LIB), Cdouble, ()))
+clap_latency() = ccall((:clap_host_latency, CLAP_LIB), Cdouble, ())
 
 function clap_reset_counters!()
-    ensure_clap()
     ccall((:clap_host_reset_counters, CLAP_LIB), Cvoid, ())
     return nothing
 end
@@ -195,7 +210,6 @@ and every `uint32` is exactly representable as a `Float64`, so a model can name
 its own parameters with nothing to keep in sync driver-side.
 """
 function clap_params()
-    ensure_clap()
     n = clap_param_count()
     # Written out rather than looped over a symbol: a ccall's function name and
     # library must be literal, not a local variable.
@@ -210,7 +224,7 @@ end
 
 "The plugin's own current value for `param_id`, or `NaN` for an unknown id."
 clap_param_value(param_id::Real) =
-    (ensure_clap(); ccall((:clap_host_param_value, CLAP_LIB), Cdouble, (Cdouble,), param_id))
+    ccall((:clap_host_param_value, CLAP_LIB), Cdouble, (Cdouble,), param_id)
 
 """
     clap_fill!(samples; channels = 1) -> token
@@ -219,7 +233,6 @@ Fill the input block from `samples` (per channel) and return its token, so a
 driver or a test can supply audio the node then processes.
 """
 function clap_fill!(samples::AbstractVector{<:Real}; channels::Integer = 1)
-    ensure_clap()
     v = Vector{Cdouble}(samples)
     return ccall((:clap_in_fill, CLAP_LIB), Cdouble, (Ptr{Cdouble}, Clong, Clong),
                  v, length(v) ÷ channels, channels)
@@ -233,7 +246,6 @@ refusal the node-side accessors make, so a test cannot accidentally check
 yesterday's audio.
 """
 function clap_out(token::Real; channel::Integer = 0)
-    ensure_clap()
     n = ccall((:clap_out_count, CLAP_LIB), Cdouble, (Cdouble,), token)
     isnan(n) && return Float64[]
     return [ccall((:clap_out_sample, CLAP_LIB), Cdouble, (Cdouble, Cdouble, Cdouble),

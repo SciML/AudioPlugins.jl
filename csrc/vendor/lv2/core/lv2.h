@@ -3,8 +3,8 @@
 // Copyright 2000-2002 Richard W.E. Furse, Paul Barton-Davis, Stefan Westerfeld.
 // SPDX-License-Identifier: ISC
 
-#ifndef LV2_CORE_LV2_H
-#define LV2_CORE_LV2_H
+#ifndef LV2_H_INCLUDED
+#define LV2_H_INCLUDED
 
 /**
    @defgroup lv2 LV2
@@ -36,7 +36,6 @@
 #define LV2_CORE__AnalyserPlugin     LV2_CORE_PREFIX "AnalyserPlugin"      ///< http://lv2plug.in/ns/lv2core#AnalyserPlugin
 #define LV2_CORE__AudioPort          LV2_CORE_PREFIX "AudioPort"           ///< http://lv2plug.in/ns/lv2core#AudioPort
 #define LV2_CORE__BandpassPlugin     LV2_CORE_PREFIX "BandpassPlugin"      ///< http://lv2plug.in/ns/lv2core#BandpassPlugin
-#define LV2_CORE__BandstopPlugin     LV2_CORE_PREFIX "BandstopPlugin"      ///< http://lv2plug.in/ns/lv2core#BandstopPlugin
 #define LV2_CORE__CVPort             LV2_CORE_PREFIX "CVPort"              ///< http://lv2plug.in/ns/lv2core#CVPort
 #define LV2_CORE__ChorusPlugin       LV2_CORE_PREFIX "ChorusPlugin"        ///< http://lv2plug.in/ns/lv2core#ChorusPlugin
 #define LV2_CORE__CombPlugin         LV2_CORE_PREFIX "CombPlugin"          ///< http://lv2plug.in/ns/lv2core#CombPlugin
@@ -100,7 +99,6 @@
 #define LV2_CORE__index              LV2_CORE_PREFIX "index"               ///< http://lv2plug.in/ns/lv2core#index
 #define LV2_CORE__integer            LV2_CORE_PREFIX "integer"             ///< http://lv2plug.in/ns/lv2core#integer
 #define LV2_CORE__isLive             LV2_CORE_PREFIX "isLive"              ///< http://lv2plug.in/ns/lv2core#isLive
-#define LV2_CORE__isSideChain        LV2_CORE_PREFIX "isSideChain"         ///< http://lv2plug.in/ns/lv2core#isSideChain
 #define LV2_CORE__latency            LV2_CORE_PREFIX "latency"             ///< http://lv2plug.in/ns/lv2core#latency
 #define LV2_CORE__maximum            LV2_CORE_PREFIX "maximum"             ///< http://lv2plug.in/ns/lv2core#maximum
 #define LV2_CORE__microVersion       LV2_CORE_PREFIX "microVersion"        ///< http://lv2plug.in/ns/lv2core#microVersion
@@ -353,13 +351,11 @@ typedef struct LV2_Descriptor {
    Put this (LV2_SYMBOL_EXPORT) before any functions that are to be loaded
    by the host as a symbol from the dynamic library.
 */
-#ifndef LV2_SYMBOL_EXPORT
-#  ifdef _WIN32
-#    define LV2_SYMBOL_EXPORT LV2_SYMBOL_EXTERN __declspec(dllexport)
-#  else
-#    define LV2_SYMBOL_EXPORT \
-      LV2_SYMBOL_EXTERN __attribute__((visibility("default")))
-#  endif
+#ifdef _WIN32
+#  define LV2_SYMBOL_EXPORT LV2_SYMBOL_EXTERN __declspec(dllexport)
+#else
+#  define LV2_SYMBOL_EXPORT \
+    LV2_SYMBOL_EXTERN __attribute__((visibility("default")))
 #endif
 
 /**
@@ -385,7 +381,8 @@ typedef struct LV2_Descriptor {
    Note that `index` has no meaning, hosts MUST NOT depend on it remaining
    consistent between loads of the plugin library.
 */
-LV2_SYMBOL_EXPORT const LV2_Descriptor*
+LV2_SYMBOL_EXPORT
+const LV2_Descriptor*
 lv2_descriptor(uint32_t index);
 
 /**
@@ -450,7 +447,8 @@ typedef struct {
    be destroyed (using LV2_Lib_Descriptor::cleanup()) until all plugins loaded
    from that library have been destroyed.
 */
-LV2_SYMBOL_EXPORT const LV2_Lib_Descriptor*
+LV2_SYMBOL_EXPORT
+const LV2_Lib_Descriptor*
 lv2_lib_descriptor(const char* bundle_path, const LV2_Feature* const* features);
 
 /**
@@ -469,4 +467,4 @@ typedef const LV2_Lib_Descriptor* (*LV2_Lib_Descriptor_Function)(
    @}
 */
 
-#endif // LV2_CORE_LV2_H
+#endif /* LV2_H_INCLUDED */

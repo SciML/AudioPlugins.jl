@@ -1,5 +1,14 @@
 /* probe.c -- C-level verification of the CLAP host, hosting our own
- * bundle. Every expectation here is arithmetic, not a recording. */
+ * bundle. Every expectation here is arithmetic, not a recording.
+ *
+ * Build and run from the repository root, against the same sources the JLL
+ * is built from:
+ *
+ *   cc -O2 -fPIC -shared -o /tmp/ap_test.clap test/plugins/ap_test_plugins.c
+ *   cc -O2 -o /tmp/probe test/probe.c csrc/clap_host.c -ldl -lm
+ *   /tmp/probe /tmp/ap_test.clap
+ *
+ * (or pass the path `clap_test_bundle()` returns from Julia). */
 
 #include "../csrc/clap_host.h"
 #include <math.h>
@@ -12,9 +21,8 @@ static void ck(int ok, const char *what) {
     if (!ok) fails++;
 }
 
-#define BUNDLE "deps/ap_test.clap"
-
-int main(void) {
+int main(int argc, char **argv) {
+    const char *BUNDLE = argc > 1 ? argv[1] : "ap_test.clap";
     /* --- discovery ------------------------------------------------- */
     long n = clap_host_scan(BUNDLE);
     ck(n == 3, "scan finds 3 plugins in the bundle");
@@ -26,9 +34,11 @@ int main(void) {
     /* --- failure paths, all loud ----------------------------------- */
     ck(clap_host_scan("/nonexistent.clap") == -1, "missing bundle fails");
     ck(strlen(clap_host_last_error()) > 0, "  ... and sets an error message");
-    ck(clap_host_scan("/lib/aarch64-linux-gnu/libm.so.6") == -1, "a shared object without clap_entry fails");
-    ck(strstr(clap_host_last_error(), "clap_entry") != NULL,
-       "  ... naming the missing clap_entry symbol");
+    if (argc > 2) {   /* optionally: a real shared object that is not a plugin */
+        ck(clap_host_scan(argv[2]) == -1, "a shared object without clap_entry fails");
+        ck(strstr(clap_host_last_error(), "clap_entry") != NULL,
+           "  ... naming the missing clap_entry symbol");
+    }
     ck(clap_host_open(BUNDLE, "no.such.id", 48000, 64, 1) != 0, "unknown plugin id fails");
     ck(strstr(clap_host_last_error(), "no.such.id") != NULL, "  ... naming the id asked for");
     ck(clap_host_open(BUNDLE, "ap.gain", 48000, 99999, 1) != 0, "oversized block fails");

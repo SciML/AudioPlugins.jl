@@ -1,13 +1,24 @@
 name = "AudioPlugins"
 uuid = "83119930-5344-4127-8689-15f5870d6d1a"
 authors = ["JuliaHub, Inc. and contributors"]
-version = "1.0.0"
+version = "1.2.0"
+
+[deps]
+CLAPHost_jll = "c9c4f589-041a-5a1c-a149-a4cdc6e5211b"
+LV2Host_jll = "a1fb6e78-af1d-557a-bd91-b38940fc92f3"
+Scratch = "6c6a2e73-6563-6170-7368-637461726353"
+lv2_jll = "7b3f7994-2f4c-56ea-8c5f-7c434df6080d"
 
 [compat]
+CLAPHost_jll = "1.0"
+LV2Host_jll = "1.2"
+Scratch = "1"
 julia = "1.10"
+lv2_jll = "1.18"
 
 [extras]
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Libdl", "Test"]
