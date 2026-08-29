@@ -1,0 +1,43 @@
+# The C/C++ hosts, compiled and probed directly, with no Julia involved:
+# the same sources Yggdrasil builds into CLAPHost_jll / LV2Host_jll /
+# VST3Host_jll, and the ones a generated standalone program links.
+# test/probe*.c host the package's own test plugins and check arithmetic.
+name: C probes
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install lilv (for the LV2 host) and the LV2 example plugins
+        run: sudo apt-get update && sudo apt-get install -y liblilv-dev lv2-dev lv2-examples
+      - name: CLAP
+        run: |
+          cc -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -o ap_test.clap test/plugins/ap_test_plugins.c
+          cc -std=gnu99 -O2 -Wall -Wextra -o probe test/probe.c csrc/clap_host.c -ldl -lm
+          ./probe "$PWD/ap_test.clap" /lib/x86_64-linux-gnu/libm.so.6
+      - name: LV2
+        run: |
+          mkdir -p lv2/ap_test.lv2
+          cc -O2 -fPIC -shared -Wall -Wextra -o lv2/ap_test.lv2/ap_test.so test/plugins/ap_test_lv2.c
+          cp test/plugins/ap_test_lv2.ttl lv2/ap_test.lv2/ap_test.ttl
+          printf '@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n' > lv2/ap_test.lv2/manifest.ttl
+          for p in gain onepole lookahead; do printf '<urn:audioplugins:test:%s> a lv2:Plugin ; lv2:binary <ap_test.so> ; rdfs:seeAlso <ap_test.ttl> .\n' $p >> lv2/ap_test.lv2/manifest.ttl; done
+          cc -std=gnu99 -O2 -Wall -Wextra -o probe_lv2 test/probe_lv2.c csrc/lv2_host.c -Icsrc/vendor $(pkg-config --cflags --libs lilv-0) -lm
+          ./probe_lv2 "$PWD/lv2" /usr/lib/lv2
+      - name: VST3 SDK (v3.8.1, MIT), libraries only
+        run: |
+          git clone -q --branch v3.8.1_build_84 --depth 1 --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk sdk
+          cmake -S sdk -B sdk/build -DCMAKE_BUILD_TYPE=Release -DSMTG_ENABLE_VSTGUI_SUPPORT=OFF -DSMTG_ENABLE_VST3_HOSTING_EXAMPLES=OFF -DSMTG_ENABLE_VST3_PLUGIN_EXAMPLES=OFF -DSMTG_RUN_VST_VALIDATOR=OFF -DSMTG_CREATE_PLUGIN_LINK=OFF
+          cmake --build sdk/build --parallel 4 --target base pluginterfaces sdk sdk_common sdk_hosting
+      - name: VST3
+        run: |
+          SDK=$PWD/sdk; H=$SDK/public.sdk/source/vst/hosting; L=$SDK/build/lib/Release
+          c++ -std=c++17 -O2 -fPIC -shared -fvisibility=hidden -DRELEASE=1 -I$SDK -o libvst3_host.so csrc/vst3_host.cpp $H/plugprovider.cpp $H/module_linux.cpp -L$L -lsdk_hosting -lsdk_common -lsdk -lbase -lpluginterfaces -ldl -lpthread -Wl,--no-undefined
+          mkdir -p ap_test.vst3/Contents/x86_64-linux
+          c++ -std=c++17 -O2 -fPIC -shared -fvisibility=hidden -DRELEASE=1 -I$SDK -o ap_test.vst3/Contents/x86_64-linux/ap_test.so test/plugins/ap_test_vst3.cpp $SDK/public.sdk/source/vst/vstsinglecomponenteffect.cpp $SDK/public.sdk/source/main/linuxmain.cpp -L$L -lsdk -lsdk_common -lbase -lpluginterfaces -lpthread -Wl,--no-undefined
+          cc -std=gnu99 -O2 -Wall -Wextra -o probe_vst3 test/probe_vst3.c ./libvst3_host.so -lm -Wl,-rpath,$PWD
+          ./probe_vst3 "$PWD/ap_test.vst3"

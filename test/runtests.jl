@@ -8,6 +8,7 @@
 # the synthetic sources take in AudioComponents and VisionComponents.
 
 using Test
+using Libdl
 using AudioPlugins
 const AP = AudioPlugins
 
@@ -16,6 +17,22 @@ const BUNDLE = clap_test_bundle()
 sha_free(x) = x  # (no fixtures to checksum: the plugin is built from source here)
 
 @testset "AudioPlugins / CLAP" begin
+
+    @testset "the host comes prebuilt, the test plugins do not" begin
+        # The host library is the JLL's, not something compiled into the
+        # package directory: it exists, it loads, and it exports the ABI.
+        @test isfile(clap_lib_path())
+        @test !startswith(clap_lib_path(), pkgdir(AudioPlugins))
+        h = Libdl.dlopen(clap_lib_path())
+        @test Libdl.dlsym(h, :clap_process) != C_NULL
+        Libdl.dlclose(h)
+        # The sources still ship, for a standalone C program to link.
+        @test isfile(clap_src_path())
+        @test endswith(clap_src_path(), joinpath("csrc", "clap_host.c"))
+        # The test bundle is built into a scratch space, not into the package.
+        @test !startswith(BUNDLE, pkgdir(AudioPlugins))
+        @test (@test_deprecated build_clap_host!()) == clap_lib_path()
+    end
 
     @testset "the bundle builds and enumerates" begin
         @test isfile(BUNDLE)
@@ -164,3 +181,5 @@ sha_free(x) = x  # (no fixtures to checksum: the plugin is built from source her
     end
 
 end
+
+include("vst3tests.jl")
