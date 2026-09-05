@@ -232,6 +232,17 @@ end
         @test_throws ArgumentError CStep(; source = "/nonexistent.c", header = gain_spec.step.header)
         @test_throws ArgumentError JuliaStep(; file = "/nonexistent.jl")
         @test_throws ArgumentError JuliaStep(; file = joinpath(FIX, "jl_gain.jl"), trim = "maybe")
+        @test_throws ArgumentError JuliaStep(; file = joinpath(FIX, "jl_gain.jl"), privatize = true)
+        @test_throws ArgumentError JuliaStep(; file = joinpath(FIX, "jl_gain.jl"), bundle = true,
+                                             privatize = "nine_long")
+        @test JuliaStep(; file = joinpath(FIX, "jl_gain.jl"), bundle = true, privatize = "ap").privatize == "ap"
+        mktempdir() do d
+            toml = read(joinpath(FIX, "jl_gain.toml"), String)
+            toml = replace(toml, "julia = \"jl_gain.jl\"" =>
+                                 "julia = \"$(joinpath(FIX, "jl_gain.jl"))\"\nbundle = true\nprivatize = true")
+            write(joinpath(d, "p.toml"), toml)
+            @test read_plugin_spec(joinpath(d, "p.toml")).step.privatize === true
+        end
         @test_throws ArgumentError PluginSpec(; id = "a", name = "b", base = "c", pars = "P",
                                               step = gain_spec.step, source = gain_spec.step.source)
         @test_throws ArgumentError PluginSpec(; id = "a", name = "b", base = "c",
@@ -451,6 +462,59 @@ end
             x = signal(96)
             @test probe_run(jl_decim, x, 96; params = ((0, 0.5), (1, 3.0))).y == decimate_hold(x, 3, 0.5)
             @test probe_run(jl_decim, x, 32; params = ((0, 1.0), (1, 5.0))).y == decimate_hold(x, 5, 1.0)
+        end
+
+        if !Sys.iswindows()
+            @testset "privatize = true: two juliac plugins coexist in one process" begin
+                probe_two = joinpath(dir, "probe_two")
+                let cc = AP._c_compiler(), src = joinpath(FIX, "probe_two.c")
+                    dl = Sys.islinux() ? ["-ldl"] : String[]
+                    run(`$cc -O2 -Wall -Wextra -I$(AP.VENDOR_DIR) -o $probe_two $src $dl -lm`)
+                end
+                function shipped(spec, sub, privatize)
+                    s = PluginSpec(; id = spec.id, name = spec.name, base = spec.base,
+                                   inputs = spec.inputs, params = spec.params,
+                                   sample_rate_field = spec.sample_rate_field,
+                                   constants = spec.constants,
+                                   step = JuliaStep(; file = spec.step.file, bundle = true, privatize))
+                    return export_plugin(s, joinpath(dir, sub, spec.base * ".clap"))
+                end
+                x = signal(128)
+                input = join((repr(v) for v in x), "\n") * "\n"
+                function both(a, b)
+                    out = IOBuffer()
+                    p = run(pipeline(ignorestatus(`$probe_two $a $b 48000 128 1 0 0.5`);
+                                     stdin = IOBuffer(input), stdout = out, stderr = devnull))
+                    lines = split(String(take!(out)), '\n'; keepempty = false)
+                    ya = [parse(Float64, l[3:end]) for l in lines if startswith(l, "A ")]
+                    yb = [parse(Float64, l[3:end]) for l in lines if startswith(l, "B ")]
+                    return (; ok = success(p), ya, yb)
+                end
+
+                gain_p = shipped(jl_gain_spec, "priv", true)
+                eq_p = shipped(jl_eq_spec, "priv", true)
+                r = both(gain_p, eq_p)
+                @test r.ok
+                @test r.ya == x .* 0.5
+                @test maximum(abs.(r.yb .- rbj_peaking(x, 48000, f0, q, gdb))) < eq_tol
+                if Sys.islinux()
+                    # Each plugin names its own salted libjulia, and neither the stock one.
+                    needed(b) = [m[1] for m in eachmatch(r"\[(\S*libjulia\.so\S*)\]", read(`readelf -d $b`, String))]
+                    ng, ne = needed(gain_p), needed(eq_p)
+                    @test length(ng) == 1 && length(ne) == 1
+                    @test ng != ne
+                    @test !any(startswith("libjulia."), ng) && !any(startswith("libjulia."), ne)
+                    libs = readdir(joinpath(AP.runtime_layout(CLAP(), gain_p).dir, "lib"))
+                    @test any(f -> endswith(f, "_libjulia.so"), libs)
+                    @test !any(==("libjulia.so"), libs)
+                end
+                # Without privatisation both plugins want the one libjulia the loader
+                # has already loaded, and the second runtime aborts the process.
+                gain_n = shipped(jl_gain_spec, "plain", false)
+                eq_n = shipped(jl_eq_spec, "plain", false)
+                @test !both(gain_n, eq_n).ok
+                @test both(gain_p, gain_p).ok             # the same plugin twice is fine
+            end
         end
     end
 end

@@ -31,7 +31,8 @@ function AudioPlugins._export_julia_step(format::PluginFormat, spec::PluginSpec,
             if step.bundle
                 _clear_runtime(layout.dir)
                 JuliaC.bundle_products(JuliaC.BundleRecipe(; link_recipe = link,
-                                                            output_dir = layout.dir))
+                                                            output_dir = layout.dir,
+                                                            privatize = step.privatize))
             end
         end
         place_library(format, spec, link.outname, out)

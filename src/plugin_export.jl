@@ -176,7 +176,7 @@ struct CStep <: StepSource
 end
 
 """
-    JuliaStep(; file, project = "", trim = "safe", bundle = false)
+    JuliaStep(; file, project = "", trim = "safe", bundle = false, privatize = false)
 
 A step function written in Julia and compiled to a trimmed library by
 juliac. `file` defines `<base>_step` and `<base>_reset` as
@@ -208,19 +208,32 @@ Building needs `using JuliaC` and Julia ≥ 1.12. The plugin links against
 the runtime is copied next to the plugin and found by a relative rpath,
 which is what makes the bundle relocatable. Either way the plugin brings
 a Julia runtime with it, which has consequences the README spells out.
+
+Two such plugins in one host would share, and fight over, one `libjulia`.
+`privatize = true` (needs `bundle = true`) salts the bundled runtime's
+library names and symbol versions, so each plugin loads its own; the salt
+derives from the plugin's name and the Julia version, or pass a string
+(at most 8 characters, a C identifier) to choose it.
 """
 struct JuliaStep <: StepSource
     file::String
     project::String
     trim::String
     bundle::Bool
-    function JuliaStep(; file, project = "", trim = "safe", bundle::Bool = false)
+    privatize::Union{Bool, String}
+    function JuliaStep(; file, project = "", trim = "safe", bundle::Bool = false,
+                       privatize::Union{Bool, AbstractString} = false)
         isfile(file) || throw(ArgumentError("file $(repr(file)) is not a file"))
+        privatize == false || bundle ||
+            throw(ArgumentError("privatize needs bundle = true: only a bundled runtime can be salted"))
+        privatize isa AbstractString && !occursin(r"^[A-Za-z_][A-Za-z0-9_]{0,7}$", privatize) &&
+            throw(ArgumentError("privatize salt must be a C identifier of at most 8 characters, got $(repr(privatize))"))
         project == "" || isdir(project) || isfile(project) ||
             throw(ArgumentError("project $(repr(project)) does not exist"))
         trim in ("safe", "unsafe", "unsafe-warn", "no") ||
             throw(ArgumentError("trim must be safe, unsafe, unsafe-warn or no, got $(repr(trim))"))
-        return new(abspath(file), project == "" ? "" : abspath(project), String(trim), bundle)
+        return new(abspath(file), project == "" ? "" : abspath(project), String(trim), bundle,
+                   privatize isa AbstractString ? String(privatize) : privatize)
     end
 end
 
@@ -374,6 +387,7 @@ julia = "ex_gain.jl"
 project = "."                 # optional: environment to compile in
 trim = "safe"                 # optional: juliac trim mode
 bundle = false                # optional: copy the Julia runtime next to the plugin
+privatize = false             # optional: salt that runtime so plugins coexist; true or a salt
 
 [[param]]
 id = 0
@@ -413,7 +427,8 @@ function read_plugin_spec(path::AbstractString)
             throw(ArgumentError("$path: [build] names both `julia` and `source`"))
         JuliaStep(; file = resolve(build["julia"]),
                   project = something(resolve(get(build, "project", nothing)), ""),
-                  trim = get(build, "trim", "safe"), bundle = get(build, "bundle", false))
+                  trim = get(build, "trim", "safe"), bundle = get(build, "bundle", false),
+                  privatize = get(build, "privatize", false))
     else
         haskey(build, "source") && haskey(build, "header") ||
             throw(ArgumentError("$path: [build] needs `source` and `header`, or `julia`"))
@@ -565,7 +580,8 @@ end
 function _ccallable_signature(mod::Module, name::AbstractString, file::AbstractString)
     sym = Symbol(name)
     isdefined(mod, sym) || throw(ArgumentError("$file does not define $name"))
-    f = getfield(mod, sym)
+    # The binding was created by an include in this same call, hence a newer world.
+    f = Base.invokelatest(getfield, mod, sym)
     ms = methods(f)
     length(ms) == 1 || throw(ArgumentError("$name must have exactly one method, found $(length(ms))"))
     m = only(ms)

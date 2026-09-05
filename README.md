@@ -189,11 +189,13 @@ initialises a Julia runtime when the host loads it. Consequences:
   the runtime (about 120 MB of libraries) next to the plugin — `Name.clap.runtime/` beside a
   Linux `.clap`, `Contents/Resources/julia/` inside a macOS bundle — with a relative rpath, and
   that is the relocatable form.
-- **One runtime per process.** Two juliac plugins in the same host share, and fight over, one
-  `libjulia` unless each bundles a privatised runtime (JuliaC's `--privatize`), which this
-  package does not drive yet. For the same reason a juliac plugin cannot be hosted from
-  inside the Julia process that built it: the test suite hosts them from a C probe
-  (`test/export/probe_step.c`) in a separate process, which is also the public CI story.
+- **One runtime per process, unless privatised.** Two juliac plugins in the same host would
+  share, and fight over, one `libjulia`. `JuliaStep(bundle = true, privatize = true)` salts
+  the bundled runtime's library names and symbol versions (JuliaC's `--privatize`), so each
+  plugin loads its own; `test/export/probe_two.c` loads two such plugins into one process
+  and runs audio through both. A juliac plugin still cannot be hosted from inside the Julia
+  process that built it: the test suite hosts them from C probes in a separate process,
+  which is also the public CI story.
 - **Realtime.** JuliaC disables Julia's signal handlers and pins the runtime to one thread
   for a library, and an isbits step allocates nothing, but the garbage collector still exists
   in the audio callback. A C step has no such caveat.
