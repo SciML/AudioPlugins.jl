@@ -203,7 +203,9 @@ needs no `pars` name for a Julia step. `project` is the environment the
 file is compiled in (the active one by default) and `trim` the juliac
 trim mode.
 
-Building needs `using JuliaC` and Julia ≥ 1.12. The plugin links against
+Building needs `using JuliaC` and Julia ≥ 1.12, on Linux or macOS: Windows
+has no rpath, so a plugin could not find its runtime, and a Julia step is
+refused there. The plugin links against
 `libjulia` at the building Julia's absolute path; with `bundle = true`
 the runtime is copied next to the plugin and found by a relative rpath,
 which is what makes the bundle relocatable. Either way the plugin brings
@@ -897,7 +899,9 @@ function export_plugin(spec::PluginSpec, out::AbstractString; format::PluginForm
         end
         objects = String[]
         strict = ["-std=gnu99", "-Wall", "-Wextra", "-Werror"]
-        common = ["-O2", "-fPIC", "-fvisibility=hidden", incs..., pc.cflags...]
+        # Windows code is position independent already, and MinGW warns about -fPIC.
+        pic = Sys.iswindows() ? String[] : ["-fPIC"]
+        common = ["-O2", pic..., "-fvisibility=hidden", incs..., pc.cflags...]
         for (i, src) in enumerate(wrapper.sources)
             obj = joinpath(dir, "wrapper_$i.o")
             _run(`$cc $strict $common -c $src -o $obj`, verbose)
@@ -908,7 +912,7 @@ function export_plugin(spec::PluginSpec, out::AbstractString; format::PluginForm
         push!(objects, model)
         library = joinpath(dir, "plugin." * Base.BinaryPlatforms.platform_dlext())
         undefined = Sys.isapple() ? String[] : ["-Wl,--no-undefined"]
-        _run(`$cc -shared -fPIC -o $library $objects $(pc.libs) $undefined`, verbose)
+        _run(`$cc -shared $pic -o $library $objects $(pc.libs) $undefined`, verbose)
         place_library(format, spec, library, out)
     end
     return out

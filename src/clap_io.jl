@@ -27,7 +27,8 @@
 # be called with the same ones the model was built against.
 
 
-export build_clap_host!, clap_lib_path, clap_src_path, clap_scan, clap_open!, clap_close!,
+export build_clap_host!, clap_host_available, clap_lib_path, clap_src_path, clap_scan,
+       clap_open!, clap_close!,
        clap_is_open, clap_last_error, clap_plugin_name,
        clap_params, clap_param_count, clap_latency,
        clap_block_size, clap_sample_rate, clap_n_process, clap_reset_counters!,
@@ -40,10 +41,13 @@ export build_clap_host!, clap_lib_path, clap_src_path, clap_scan, clap_open!, cl
 # so it is a compile-time constant that survives a relocated depot. The
 # absolute path -- what a generated C program links against -- is
 # `clap_lib_path()`, and the C source it was built from is `clap_src_path()`.
-using CLAPHost_jll: CLAPHost_jll, libclap_host
+using CLAPHost_jll: CLAPHost_jll
 using Scratch: @get_scratch!
 
-const CLAP_LIB = libclap_host
+const CLAP_HOST_AVAILABLE = CLAPHost_jll.is_available()
+# Where the JLL has no build, the soname stands in so the module still loads
+# and authoring works; a hosting call then fails to load the library.
+const CLAP_LIB = CLAP_HOST_AVAILABLE ? CLAPHost_jll.libclap_host : "libclap_host"
 const CLAP_SRC = normpath(joinpath(@__DIR__, "..", "csrc", "clap_host.c"))
 
 """
@@ -61,7 +65,24 @@ your C compiler and point the JLL at it through a preference:
 
 then restart Julia.
 """
-clap_lib_path() = CLAPHost_jll.libclap_host_path::String
+function clap_lib_path()
+    CLAP_HOST_AVAILABLE ||
+        error("CLAPHost_jll has no build of the CLAP host for this platform " *
+              "($(Base.BinaryPlatforms.host_triplet())); host from a C program over " *
+              "csrc/clap_host.c instead, see clap_host_available()")
+    return CLAPHost_jll.libclap_host_path::String
+end
+
+"""
+    clap_host_available() -> Bool
+
+Whether `CLAPHost_jll` ships the prebuilt host for this platform. Where it
+does not (Windows, until https://github.com/JuliaPackaging/Yggdrasil/pull/14685
+lands), the module loads and [`export_plugin`](@ref) works, but the
+`clap_*` hosting functions cannot load the host: host from a C program
+over `csrc/clap_host.c` instead, as `test/export/probe_step.c` does.
+"""
+clap_host_available() = CLAP_HOST_AVAILABLE
 
 """
     clap_src_path() -> String

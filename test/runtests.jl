@@ -16,6 +16,17 @@ const BUNDLE = clap_test_bundle()
 
 sha_free(x) = x  # (no fixtures to checksum: the plugin is built from source here)
 
+if !clap_host_available()
+    @testset "AudioPlugins / CLAP: no prebuilt host on this platform" begin
+        # Windows, until CLAPHost_jll ships a build. Hosting is covered by
+        # the C probes in test/export, which compile csrc/clap_host.c.
+        @test isfile(clap_src_path())
+        @test_throws ErrorException clap_lib_path()
+        @test_throws ErrorException clap_scan(BUNDLE)
+        @info "CLAPHost_jll has no build for $(Base.BinaryPlatforms.host_triplet()): " *
+              "in-process hosting tests do not run here"
+    end
+else
 @testset "AudioPlugins / CLAP" begin
 
     @testset "the host comes prebuilt, the test plugins do not" begin
@@ -181,6 +192,7 @@ sha_free(x) = x  # (no fixtures to checksum: the plugin is built from source her
     end
 
 end
+end # clap_host_available()
 
 include("export_tests.jl")
 

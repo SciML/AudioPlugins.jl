@@ -20,7 +20,7 @@ const FIX_STATE = joinpath(@__DIR__, "export")
     end
     function round_trip(bundle, id, value)
         out = read(`$probe $bundle $id $value`, String)
-        pairs = (split(l, ' '; limit = 2) for l in split(out, '\n'; keepempty = false))
+        pairs = (split(l, ' '; limit = 2) for l in split(out, r"\r?\n"; keepempty = false))
         return Dict(String(k) => String(v) for (k, v) in pairs)
     end
 
@@ -33,7 +33,7 @@ const FIX_STATE = joinpath(@__DIR__, "export")
     gain = export_plugin(gain_spec, joinpath(dir, "fx_gain.clap"))
     bundles = ["C" => gain]
 
-    if VERSION >= v"1.12" && isdefined(JuliaC, :ImageRecipe)
+    if VERSION >= v"1.12" && isdefined(JuliaC, :ImageRecipe) && !Sys.iswindows()
         jl_spec = read_plugin_spec(joinpath(FIX_STATE, "jl_gain.toml"))
         push!(bundles, "Julia" => export_plugin(jl_spec, joinpath(dir, "jl_gain.clap")))
     end

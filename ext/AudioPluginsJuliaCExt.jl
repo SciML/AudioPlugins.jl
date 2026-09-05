@@ -9,6 +9,9 @@ function AudioPlugins._export_julia_step(format::PluginFormat, spec::PluginSpec,
     isdefined(JuliaC, :ImageRecipe) ||
         error("export_plugin: JuliaC $(pkgversion(JuliaC)) only builds on Julia ≥ 1.12; " *
               "this is Julia $VERSION")
+    Sys.iswindows() &&
+        error("export_plugin: a JuliaStep is not supported on Windows yet: the loader has no " *
+              "rpath, so the plugin could not find the Julia runtime it links against")
     step = spec.step::JuliaStep
     reflected = julia_step_header(spec)
     spec = _with_pars(spec, reflected.pars)

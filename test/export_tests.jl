@@ -127,42 +127,6 @@ end
     gain = export_plugin(gain_spec, joinpath(dir, "fx_gain.clap"))
     eq = export_plugin(eq_spec, joinpath(dir, "fx_eq.clap"))
 
-    @testset "the bundle enumerates as described" begin
-        @test ispath(gain) && ispath(eq)
-        @test !startswith(gain, pkgdir(AudioPlugins))
-        plugs = clap_scan(gain)
-        @test length(plugs) == 1
-        @test plugs[1].id == gain_spec.id && plugs[1].name == "Fixture Gain"
-        clap_open!(gain; plugin_id = gain_spec.id, sample_rate = 48000, block_size = 64,
-                   channels = 2)
-        @test clap_plugin_name() == "Fixture Gain"
-        @test clap_latency() == 0.0
-        ps = clap_params()
-        @test [p.id for p in ps] == [0.0, 7.0]
-        @test ps[1].name == "Gain" && (ps[1].min, ps[1].max, ps[1].default) == (0.0, 4.0, 1.0)
-        @test ps[2].name == "Bypass" && (ps[2].min, ps[2].max, ps[2].default) == (0.0, 1.0, 0.0)
-    end
-
-    @testset "gain at 0.5: y == x * 0.5, sample-exactly, on both channels" begin
-        x = signal(64)
-        t = clap_fill!(x)
-        o = AP.clp_process(t, 0, 0.5, -1, 0, -1, 0, -1, 0)
-        @test clap_out(o; channel = 0) == x .* 0.5
-        @test clap_out(o; channel = 1) == x .* 0.5
-        @test maximum(abs.(clap_out(o) .- x .* 0.5)) == 0.0
-        @test process(x, (0, 2.0)) == x .* 2
-    end
-
-    @testset "parameters are clamped, and a stepped bool rounds" begin
-        x = signal(64)
-        @test process(x, (0, 0.5), (7, 1.0)) == x            # bypassed
-        @test AP.clap_param_value(7) == 1.0
-        @test process(x, (0, 0.5), (7, 0.4)) == x .* 0.5     # 0.4 rounds to 0
-        @test AP.clap_param_value(7) == 0.0
-        @test process(x, (0, 9.0), (7, 0.0)) == x .* 4       # clamped to max
-        @test AP.clap_param_value(0) == 4.0
-    end
-
     f0, q, gdb = 1000.0, 0.7071067811865476, 6.0
     eq_params = ((0, f0), (1, q), (2, gdb))
     # The host stores samples as float32, so the reference can only be met to
@@ -171,45 +135,219 @@ end
     # coefficient or a lost state term.
     eq_tol = 1e-6
 
-    @testset "peaking EQ matches the RBJ recursion" begin
-        clap_open!(eq; plugin_id = eq_spec.id, sample_rate = 48000, block_size = 256)
-        ps = clap_params()
-        @test [p.id for p in ps] == [0.0, 1.0, 2.0]
-        @test [p.default for p in ps] == [f0, q, gdb]
-        x = signal(256)
-        y = process(x, eq_params...)
-        ref = rbj_peaking(x, 48000, f0, q, gdb)
-        @test maximum(abs.(y .- ref)) < eq_tol
-        @test maximum(abs.(y .- x)) > 1e-2      # the filter is doing something
+    # A C process over csrc/clap_host.c hosts what this package built. It
+    # needs no CLAPHost_jll, so it runs where the JLL has no build (Windows,
+    # until Yggdrasil ships one), and no Julia, so it can load a juliac
+    # plugin, which brings a libjulia this process already has.
+    probe = joinpath(dir, "probe_step")
+    let cc = AP._c_compiler(), host = clap_src_path(), src = joinpath(FIX, "probe_step.c")
+        dl = Sys.islinux() ? ["-ldl"] : String[]
+        run(`$cc -O2 -Wall -Wextra -o $probe $src $host $dl -lm`)
     end
-
-    @testset "2 x 128 frames == 1 x 256 continuous, bitwise" begin
-        x = signal(256)
-        clap_open!(eq; plugin_id = eq_spec.id, sample_rate = 48000, block_size = 128)
-        split = vcat(process(x[1:128], eq_params...), process(x[129:256], eq_params...))
-        clap_open!(eq; plugin_id = eq_spec.id, sample_rate = 48000, block_size = 256)
-        whole = process(x, eq_params...)
-        @test split == whole
-        @test maximum(abs.(whole .- rbj_peaking(x, 48000, f0, q, gdb))) < eq_tol
-        # Reopening is a fresh instance, so a run restarted at the boundary
-        # must differ: that is what makes the equality above non-vacuous.
-        clap_open!(eq; plugin_id = eq_spec.id, sample_rate = 48000, block_size = 128)
-        a = process(x[1:128], eq_params...)
-        clap_open!(eq; plugin_id = eq_spec.id, sample_rate = 48000, block_size = 128)
-        b = process(x[129:256], eq_params...)
-        @test vcat(a, b) != whole
-    end
-
-    @testset "activate(sr) at 44.1 / 48 / 96 kHz gives three correct filters" begin
-        x = signal(256)
-        outs = Vector{Float64}[]
-        for fs in (44100, 48000, 96000)
-            clap_open!(eq; plugin_id = eq_spec.id, sample_rate = fs, block_size = 256)
-            y = process(x, eq_params...)
-            @test maximum(abs.(y .- rbj_peaking(x, fs, f0, q, gdb))) < eq_tol
-            push!(outs, y)
+    function probe_run(bundle, x, block; sr = 48000, params = ())
+        args = [bundle, string(sr), string(block), string(length(x) ÷ block)]
+        for (id, v) in params
+            push!(args, string(id), repr(Float64(v)))
         end
-        @test outs[1] != outs[2] && outs[2] != outs[3]
+        input = join((repr(Float64(v)) for v in x), "\n") * "\n"
+        out = read(pipeline(`$probe $args`; stdin = IOBuffer(input)), String)
+        lines = split(out, r"\r?\n"; keepempty = false)      # Windows stdout is CRLF
+        meta = String[l for l in lines if startswith(l, "#")]
+        y = [parse(Float64, l) for l in lines if !startswith(l, "#")]
+        return (; meta, y)
+    end
+
+    function probe_suite(kind, spec, gain_bundle, eq_bundle)
+        @testset "$kind, from a C host: the bundle enumerates as described" begin
+            @test ispath(gain_bundle) && ispath(eq_bundle)
+            r = probe_run(gain_bundle, signal(64), 64)
+            @test "# plugins 1" in r.meta
+            @test "# plugin $(spec.id)|$(spec.name)" in r.meta
+            @test "# name $(spec.name)" in r.meta
+            @test "# params 2" in r.meta
+            @test "# param 0|Gain|0|4|1" in r.meta
+            @test "# param 7|Bypass|0|1|0" in r.meta
+            @test length(r.y) == 64
+        end
+
+        @testset "$kind, from a C host: gain at 0.5, y == x * 0.5 sample-exactly" begin
+            x = signal(64)
+            @test probe_run(gain_bundle, x, 64; params = ((0, 0.5),)).y == x .* 0.5
+            @test probe_run(gain_bundle, x, 64).y == x                          # default gain 1
+            @test probe_run(gain_bundle, x, 64; params = ((0, 0.5), (7, 1.0))).y == x  # bypassed
+            @test probe_run(gain_bundle, x, 64; params = ((0, 9.0),)).y == x .* 4      # clamped
+        end
+
+        @testset "$kind, from a C host: EQ matches RBJ, 2 x 128 == 1 x 256, three rates" begin
+            x = signal(256)
+            whole = probe_run(eq_bundle, x, 256; params = eq_params).y
+            @test maximum(abs.(whole .- rbj_peaking(x, 48000, f0, q, gdb))) < eq_tol
+            @test maximum(abs.(whole .- x)) > 1e-2
+            split = probe_run(eq_bundle, x, 128; params = eq_params).y   # two blocks, one instance
+            @test split == whole
+            restarted = vcat(probe_run(eq_bundle, x[1:128], 128; params = eq_params).y,
+                             probe_run(eq_bundle, x[129:256], 128; params = eq_params).y)
+            @test restarted != whole
+            outs = [probe_run(eq_bundle, x, 256; sr = fs, params = eq_params).y
+                    for fs in (44100, 48000, 96000)]
+            for (fs, y) in zip((44100, 48000, 96000), outs)
+                @test maximum(abs.(y .- rbj_peaking(x, fs, f0, q, gdb))) < eq_tol
+            end
+            @test outs[1] != outs[2] && outs[2] != outs[3]
+        end
+    end
+
+    probe_suite("C step", gain_spec, gain, eq)
+
+    # A held sample-and-hold: y[i] = gain * x[k] for the latest k <= i with k % d == 0.
+    function decimate_hold(x, d, gain)
+        y = similar(x)
+        held = 0.0
+        for (i, v) in enumerate(x)
+            (i - 1) % d == 0 && (held = gain * v)
+            y[i] = held
+        end
+        return y
+    end
+
+    decim_spec = read_plugin_spec(joinpath(FIX, "fx_decim.toml"))
+    decim = export_plugin(decim_spec, joinpath(dir, "fx_decim.clap"))
+
+    # In-process hosting, through CLAPHost_jll: only where the JLL has a build.
+    if clap_host_available()
+        @testset "the bundle enumerates as described" begin
+            @test ispath(gain) && ispath(eq)
+            @test !startswith(gain, pkgdir(AudioPlugins))
+            plugs = clap_scan(gain)
+            @test length(plugs) == 1
+            @test plugs[1].id == gain_spec.id && plugs[1].name == "Fixture Gain"
+            clap_open!(gain; plugin_id = gain_spec.id, sample_rate = 48000, block_size = 64,
+                       channels = 2)
+            @test clap_plugin_name() == "Fixture Gain"
+            @test clap_latency() == 0.0
+            ps = clap_params()
+            @test [p.id for p in ps] == [0.0, 7.0]
+            @test ps[1].name == "Gain" && (ps[1].min, ps[1].max, ps[1].default) == (0.0, 4.0, 1.0)
+            @test ps[2].name == "Bypass" && (ps[2].min, ps[2].max, ps[2].default) == (0.0, 1.0, 0.0)
+        end
+
+        @testset "gain at 0.5: y == x * 0.5, sample-exactly, on both channels" begin
+            x = signal(64)
+            t = clap_fill!(x)
+            o = AP.clp_process(t, 0, 0.5, -1, 0, -1, 0, -1, 0)
+            @test clap_out(o; channel = 0) == x .* 0.5
+            @test clap_out(o; channel = 1) == x .* 0.5
+            @test maximum(abs.(clap_out(o) .- x .* 0.5)) == 0.0
+            @test process(x, (0, 2.0)) == x .* 2
+        end
+
+        @testset "parameters are clamped, and a stepped bool rounds" begin
+            x = signal(64)
+            @test process(x, (0, 0.5), (7, 1.0)) == x            # bypassed
+            @test AP.clap_param_value(7) == 1.0
+            @test process(x, (0, 0.5), (7, 0.4)) == x .* 0.5     # 0.4 rounds to 0
+            @test AP.clap_param_value(7) == 0.0
+            @test process(x, (0, 9.0), (7, 0.0)) == x .* 4       # clamped to max
+            @test AP.clap_param_value(0) == 4.0
+        end
+
+        @testset "peaking EQ matches the RBJ recursion" begin
+            clap_open!(eq; plugin_id = eq_spec.id, sample_rate = 48000, block_size = 256)
+            ps = clap_params()
+            @test [p.id for p in ps] == [0.0, 1.0, 2.0]
+            @test [p.default for p in ps] == [f0, q, gdb]
+            x = signal(256)
+            y = process(x, eq_params...)
+            ref = rbj_peaking(x, 48000, f0, q, gdb)
+            @test maximum(abs.(y .- ref)) < eq_tol
+            @test maximum(abs.(y .- x)) > 1e-2      # the filter is doing something
+        end
+
+        @testset "2 x 128 frames == 1 x 256 continuous, bitwise" begin
+            x = signal(256)
+            clap_open!(eq; plugin_id = eq_spec.id, sample_rate = 48000, block_size = 128)
+            split = vcat(process(x[1:128], eq_params...), process(x[129:256], eq_params...))
+            clap_open!(eq; plugin_id = eq_spec.id, sample_rate = 48000, block_size = 256)
+            whole = process(x, eq_params...)
+            @test split == whole
+            @test maximum(abs.(whole .- rbj_peaking(x, 48000, f0, q, gdb))) < eq_tol
+            # Reopening is a fresh instance, so a run restarted at the boundary
+            # must differ: that is what makes the equality above non-vacuous.
+            clap_open!(eq; plugin_id = eq_spec.id, sample_rate = 48000, block_size = 128)
+            a = process(x[1:128], eq_params...)
+            clap_open!(eq; plugin_id = eq_spec.id, sample_rate = 48000, block_size = 128)
+            b = process(x[129:256], eq_params...)
+            @test vcat(a, b) != whole
+        end
+
+        @testset "activate(sr) at 44.1 / 48 / 96 kHz gives three correct filters" begin
+            x = signal(256)
+            outs = Vector{Float64}[]
+            for fs in (44100, 48000, 96000)
+                clap_open!(eq; plugin_id = eq_spec.id, sample_rate = fs, block_size = 256)
+                y = process(x, eq_params...)
+                @test maximum(abs.(y .- rbj_peaking(x, fs, f0, q, gdb))) < eq_tol
+                push!(outs, y)
+            end
+            @test outs[1] != outs[2] && outs[2] != outs[3]
+        end
+
+        @testset "a mono descriptor and a Julia-side spec, no TOML" begin
+            mono = PluginSpec(; id = "org.sciml.audioplugins.fixture.mono", name = "Mono Gain",
+                              base = "fx_gain", pars = "FxGainPars", channels = 1,
+                              inputs = [("u", :audio), ("clock1", :clock)],
+                              source = gain_spec.step.source, header = gain_spec.step.header,
+                              params = [PluginParam(; id = 3, name = "Gain", field = "gain",
+                                                    min = 0, max = 2, default = 0.25)])
+            b = export_plugin(mono, joinpath(dir, "mono.clap"))
+            clap_open!(b; block_size = 32)
+            @test clap_plugin_name() == "Mono Gain"
+            @test only(clap_params()).id == 3.0
+            x = signal(32)
+            @test process(x) == x .* 0.25               # the default applies untouched
+            @test process(x, (3, 2.0)) == x .* 2
+        end
+
+        @testset "a sub-clock output is held between ticks, sample-exactly" begin
+            @test decim_spec.sub_clock
+            w = read(only(AP.emit_wrapper(CLAP(), decim_spec, mktempdir()).sources), String)
+            @test occursin("if (o.has_y) s->held[c] = o.y;", w)
+            # The phase lives in the instance, so each run starts from a fresh one.
+            fresh() = clap_open!(decim; plugin_id = decim_spec.id, sample_rate = 48000, block_size = 64)
+            x = signal(64)
+            fresh()
+            @test process(x) == decimate_hold(x, 2, 1.0)
+            fresh()
+            @test process(x, (0, 0.5), (1, 3.0)) == decimate_hold(x, 3, 0.5)
+            fresh()
+            @test process(x, (0, 0.5), (1, 1.0)) == x .* 0.5      # divisor 1: every sample present
+            fresh()
+            @test !any(isnan, process(x, (0, 1.0), (1, 8.0)))   # NaN never leaks through the hold
+        end
+
+        @testset "the sub-clock phase carries across blocks" begin
+            x = signal(96)
+            clap_open!(decim; plugin_id = decim_spec.id, sample_rate = 48000, block_size = 32)
+            split = vcat((process(x[(32b + 1):(32b + 32)], (0, 1.0), (1, 5.0)) for b in 0:2)...)
+            clap_open!(decim; plugin_id = decim_spec.id, sample_rate = 48000, block_size = 96)
+            whole = process(x, (0, 1.0), (1, 5.0))
+            @test split == whole == decimate_hold(x, 5, 1.0)
+            # 32 is not a multiple of 5, so a plugin that restarted its phase at
+            # each block would tick at the block boundary and differ.
+            clap_open!(decim; plugin_id = decim_spec.id, sample_rate = 48000, block_size = 32)
+            restarted = Float64[]
+            for b in 0:2
+                clap_open!(decim; plugin_id = decim_spec.id, sample_rate = 48000, block_size = 32)
+                append!(restarted, process(x[(32b + 1):(32b + 32)], (0, 1.0), (1, 5.0)))
+            end
+            @test restarted != whole
+        end
+
+        clap_close!()
+    else
+        @testset "no prebuilt host here: in-process hosting cannot run" begin
+            @test_throws ErrorException clap_open!(gain; block_size = 64)
+        end
     end
 
     @testset "link flags come from the .pc file" begin
@@ -239,75 +377,8 @@ end
         @test_throws ArgumentError PluginSpec(; id = "a", name = "b", base = "c")
     end
 
-    @testset "a mono descriptor and a Julia-side spec, no TOML" begin
-        mono = PluginSpec(; id = "org.sciml.audioplugins.fixture.mono", name = "Mono Gain",
-                          base = "fx_gain", pars = "FxGainPars", channels = 1,
-                          inputs = [("u", :audio), ("clock1", :clock)],
-                          source = gain_spec.step.source, header = gain_spec.step.header,
-                          params = [PluginParam(; id = 3, name = "Gain", field = "gain",
-                                                min = 0, max = 2, default = 0.25)])
-        b = export_plugin(mono, joinpath(dir, "mono.clap"))
-        clap_open!(b; block_size = 32)
-        @test clap_plugin_name() == "Mono Gain"
-        @test only(clap_params()).id == 3.0
-        x = signal(32)
-        @test process(x) == x .* 0.25               # the default applies untouched
-        @test process(x, (3, 2.0)) == x .* 2
-    end
-
-    # A held sample-and-hold: y[i] = gain * x[k] for the latest k <= i with k % d == 0.
-    function decimate_hold(x, d, gain)
-        y = similar(x)
-        held = 0.0
-        for (i, v) in enumerate(x)
-            (i - 1) % d == 0 && (held = gain * v)
-            y[i] = held
-        end
-        return y
-    end
-
-    decim_spec = read_plugin_spec(joinpath(FIX, "fx_decim.toml"))
-    decim = export_plugin(decim_spec, joinpath(dir, "fx_decim.clap"))
-
-    @testset "a sub-clock output is held between ticks, sample-exactly" begin
-        @test decim_spec.sub_clock
-        w = read(only(AP.emit_wrapper(CLAP(), decim_spec, mktempdir()).sources), String)
-        @test occursin("if (o.has_y) s->held[c] = o.y;", w)
-        # The phase lives in the instance, so each run starts from a fresh one.
-        fresh() = clap_open!(decim; plugin_id = decim_spec.id, sample_rate = 48000, block_size = 64)
-        x = signal(64)
-        fresh()
-        @test process(x) == decimate_hold(x, 2, 1.0)
-        fresh()
-        @test process(x, (0, 0.5), (1, 3.0)) == decimate_hold(x, 3, 0.5)
-        fresh()
-        @test process(x, (0, 0.5), (1, 1.0)) == x .* 0.5      # divisor 1: every sample present
-        fresh()
-        @test !any(isnan, process(x, (0, 1.0), (1, 8.0)))   # NaN never leaks through the hold
-    end
-
-    @testset "the sub-clock phase carries across blocks" begin
-        x = signal(96)
-        clap_open!(decim; plugin_id = decim_spec.id, sample_rate = 48000, block_size = 32)
-        split = vcat((process(x[(32b + 1):(32b + 32)], (0, 1.0), (1, 5.0)) for b in 0:2)...)
-        clap_open!(decim; plugin_id = decim_spec.id, sample_rate = 48000, block_size = 96)
-        whole = process(x, (0, 1.0), (1, 5.0))
-        @test split == whole == decimate_hold(x, 5, 1.0)
-        # 32 is not a multiple of 5, so a plugin that restarted its phase at
-        # each block would tick at the block boundary and differ.
-        clap_open!(decim; plugin_id = decim_spec.id, sample_rate = 48000, block_size = 32)
-        restarted = Float64[]
-        for b in 0:2
-            clap_open!(decim; plugin_id = decim_spec.id, sample_rate = 48000, block_size = 32)
-            append!(restarted, process(x[(32b + 1):(32b + 32)], (0, 1.0), (1, 5.0)))
-        end
-        @test restarted != whole
-    end
-
-    clap_close!()
-
     # ----------------------------------------------------------------------
-    # Julia steps: juliac-trimmed plugins, hosted from a C process
+    # Julia steps: juliac-trimmed plugins, hosted from the C probe
     # ----------------------------------------------------------------------
 
     jl_gain_spec = read_plugin_spec(joinpath(FIX, "jl_gain.toml"))
@@ -346,74 +417,16 @@ end
         @test_throws ArgumentError AP.julia_step_header(gain_spec)
     end
 
-    juliac_ready = VERSION >= v"1.12" && isdefined(JuliaC, :ImageRecipe)
+    juliac_ready = VERSION >= v"1.12" && isdefined(JuliaC, :ImageRecipe) && !Sys.iswindows()
 
     if !juliac_ready
-        @testset "a Julia step needs Julia >= 1.12" begin
+        @testset "a Julia step needs Julia >= 1.12 on Linux or macOS" begin
             @test_throws ErrorException export_plugin(jl_gain_spec, joinpath(dir, "jl_gain.clap"))
         end
     else
-        # The probe is the host: a plain C program over csrc/clap_host.c. A
-        # juliac plugin brings its own libjulia, and this Julia process
-        # already has one loaded, so it must be hosted from another process.
-        probe = joinpath(dir, "probe_step")
-        let cc = AP._c_compiler(), host = clap_src_path(), src = joinpath(FIX, "probe_step.c")
-            dl = Sys.islinux() ? ["-ldl"] : String[]
-            run(`$cc -O2 -Wall -Wextra -o $probe $src $host $dl -lm`)
-        end
-        function probe_run(bundle, x, block; sr = 48000, params = ())
-            args = [bundle, string(sr), string(block), string(length(x) ÷ block)]
-            for (id, v) in params
-                push!(args, string(id), repr(Float64(v)))
-            end
-            input = join((repr(Float64(v)) for v in x), "\n") * "\n"
-            out = read(pipeline(`$probe $args`; stdin = IOBuffer(input)), String)
-            lines = split(out, '\n'; keepempty = false)
-            meta = String[l for l in lines if startswith(l, "#")]
-            y = [parse(Float64, l) for l in lines if !startswith(l, "#")]
-            return (; meta, y)
-        end
-
         jl_gain = export_plugin(jl_gain_spec, joinpath(dir, "jl_gain.clap"))
         jl_eq = export_plugin(jl_eq_spec, joinpath(dir, "jl_eq.clap"))
-
-        @testset "the juliac bundle enumerates as described" begin
-            @test ispath(jl_gain) && ispath(jl_eq)
-            r = probe_run(jl_gain, signal(64), 64)
-            @test "# plugins 1" in r.meta
-            @test "# plugin $(jl_gain_spec.id)|Fixture Gain (Julia)" in r.meta
-            @test "# name Fixture Gain (Julia)" in r.meta
-            @test "# params 2" in r.meta
-            @test "# param 0|Gain|0|4|1" in r.meta
-            @test "# param 7|Bypass|0|1|0" in r.meta
-            @test length(r.y) == 64
-        end
-
-        @testset "juliac gain at 0.5: y == x * 0.5, sample-exactly" begin
-            x = signal(64)
-            @test probe_run(jl_gain, x, 64; params = ((0, 0.5),)).y == x .* 0.5
-            @test probe_run(jl_gain, x, 64).y == x                      # default gain 1
-            @test probe_run(jl_gain, x, 64; params = ((0, 0.5), (7, 1.0))).y == x   # bypassed
-            @test probe_run(jl_gain, x, 64; params = ((0, 9.0),)).y == x .* 4       # clamped
-        end
-
-        @testset "juliac EQ matches the RBJ recursion, 2 x 128 == 1 x 256, three rates" begin
-            x = signal(256)
-            whole = probe_run(jl_eq, x, 256; params = eq_params).y
-            @test maximum(abs.(whole .- rbj_peaking(x, 48000, f0, q, gdb))) < eq_tol
-            @test maximum(abs.(whole .- x)) > 1e-2
-            split = probe_run(jl_eq, x, 128; params = eq_params).y     # two blocks, one instance
-            @test split == whole
-            restarted = vcat(probe_run(jl_eq, x[1:128], 128; params = eq_params).y,
-                             probe_run(jl_eq, x[129:256], 128; params = eq_params).y)
-            @test restarted != whole
-            outs = [probe_run(jl_eq, x, 256; sr = fs, params = eq_params).y
-                    for fs in (44100, 48000, 96000)]
-            for (fs, y) in zip((44100, 48000, 96000), outs)
-                @test maximum(abs.(y .- rbj_peaking(x, fs, f0, q, gdb))) < eq_tol
-            end
-            @test outs[1] != outs[2] && outs[2] != outs[3]
-        end
+        probe_suite("Julia step", jl_gain_spec, jl_gain, jl_eq)
 
         if Sys.islinux()
             @testset "bundle = true ships the runtime next to the plugin" begin

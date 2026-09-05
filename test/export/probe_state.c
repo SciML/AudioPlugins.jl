@@ -14,16 +14,29 @@
  * streams deliver a few bytes per call, so partial reads and writes are
  * exercised the way a real host's streams would.
  *
- * Build from the repository root:
+ * Build from the repository root (drop -ldl on macOS and Windows):
  *   cc -O2 -Icsrc/vendor -o probe_state test/export/probe_state.c -ldl
  */
 
 #include "clap/clap.h"
 
-#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <windows.h>
+static void *load_library(const char *path) { return (void *)LoadLibraryA(path); }
+static void *load_symbol(void *h, const char *name) {
+    return (void *)(uintptr_t)GetProcAddress((HMODULE)h, name);
+}
+static const char *load_error(void) { return "LoadLibrary failed"; }
+#else
+#include <dlfcn.h>
+static void *load_library(const char *path) { return dlopen(path, RTLD_LOCAL | RTLD_NOW); }
+static void *load_symbol(void *h, const char *name) { return dlsym(h, name); }
+static const char *load_error(void) { return dlerror(); }
+#endif
 
 /* --- a host that offers nothing ---------------------------------- */
 
@@ -82,7 +95,7 @@ static bool ev_try_push(const clap_output_events_t *l, const clap_event_header_t
 }
 
 static void *open_bundle(const char *path) {
-    void *dl = dlopen(path, RTLD_LOCAL | RTLD_NOW);
+    void *dl = load_library(path);
     if (dl) return dl;
     /* macOS: Name.clap/Contents/MacOS/Name */
     char inner[4096], stem[1024];
@@ -92,7 +105,7 @@ static void *open_bundle(const char *path) {
     char *dot = strrchr(stem, '.');
     if (dot) *dot = '\0';
     snprintf(inner, sizeof inner, "%s/Contents/MacOS/%s", path, stem);
-    return dlopen(inner, RTLD_LOCAL | RTLD_NOW);
+    return load_library(inner);
 }
 
 static double value_of(const clap_plugin_t *p, const clap_plugin_params_t *params, clap_id id) {
@@ -111,8 +124,8 @@ int main(int argc, char **argv) {
     double value = atof(argv[3]);
 
     void *dl = open_bundle(path);
-    if (!dl) { fprintf(stderr, "dlopen: %s\n", dlerror()); return 1; }
-    const clap_plugin_entry_t *entry = dlsym(dl, "clap_entry");
+    if (!dl) { fprintf(stderr, "load: %s\n", load_error()); return 1; }
+    const clap_plugin_entry_t *entry = load_symbol(dl, "clap_entry");
     if (!entry) { fprintf(stderr, "no clap_entry\n"); return 1; }
     if (!entry->init(path)) { fprintf(stderr, "entry init failed\n"); return 1; }
     const clap_plugin_factory_t *factory = entry->get_factory(CLAP_PLUGIN_FACTORY_ID);
