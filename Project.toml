@@ -1,7 +1,7 @@
 name = "AudioPlugins"
 uuid = "83119930-5344-4127-8689-15f5870d6d1a"
 authors = ["JuliaHub, Inc. and contributors"]
-version = "1.1.0"
+version = "1.1.1"
 
 [deps]
 CLAPHost_jll = "c9c4f589-041a-5a1c-a149-a4cdc6e5211b"
