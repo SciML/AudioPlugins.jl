@@ -28,7 +28,7 @@ version = "1.11.0"
 deps = ["CLAPHost_jll", "Scratch", "TOML"]
 path = "/home/runner/work/AudioPlugins.jl/AudioPlugins.jl"
 uuid = "83119930-5344-4127-8689-15f5870d6d1a"
-version = "1.1.0"
+version = "1.1.1"
 
     [deps.AudioPlugins.extensions]
     AudioPluginsJuliaCExt = "JuliaC"
