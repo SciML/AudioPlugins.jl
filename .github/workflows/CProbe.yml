@@ -11,7 +11,7 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install lilv (for the LV2 host) and the LV2 example plugins
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential liblilv-dev lv2-dev lv2-examples
       - name: CLAP
@@ -56,7 +56,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: msys2/setup-msys2@v2
         with:
           msystem: ${{ matrix.msystem }}
