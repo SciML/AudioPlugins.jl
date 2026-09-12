@@ -20,24 +20,37 @@ bundle = clap_test_bundle()            # builds the test plugins shipped here
 clap_open!(bundle; plugin_id = "ap.gain", sample_rate = 48000, block_size = 64, channels = 1)
 ```
 
+and the same shape for LV2, against whatever the machine has installed:
+
+<!-- illustrative -->
+```julia
+path = lv2_default_path("/usr/lib/lv2")   # your bundles + the LV2 spec from lv2_jll
+lv2_scan(path)                            # every plugin lilv finds, by URI
+lv2_open!(path; uri = "http://lv2plug.in/plugins/eg-amp", block_size = 64)
+lv2_params()                              # control ports: id, name, symbol, range
+```
+
 Two formats:
 
 | Format | Licence | State |
 |---|---|---|
 | **CLAP** | MIT, header-only | host implemented and tested — discovery, instantiation, parameters, block processing, latency |
-| **LV2** | ISC | audio path implemented (`connect_port` / `run`); **discovery is not**, see below |
+| **LV2** | ISC | host implemented and tested — discovery through lilv, instantiation, parameters, block processing, latency |
 | VST3 | MIT since SDK 3.8 | not yet implemented |
 
-## How the host is shipped
+## How the hosts are shipped
 
-The C host (`csrc/clap_host.c`) is built by [Yggdrasil](https://github.com/JuliaPackaging/Yggdrasil)
-and shipped prebuilt as `CLAPHost_jll`, so using this package needs no C toolchain
-and writes nothing into the package directory. The JLL is *in addition to* `csrc/`,
+The C hosts (`csrc/clap_host.c`, `csrc/lv2_host.c`) are built by
+[Yggdrasil](https://github.com/JuliaPackaging/Yggdrasil) and shipped prebuilt as
+`CLAPHost_jll` and `LV2Host_jll`, so using this package needs no C toolchain and
+writes nothing into the package directory. The JLLs are *in addition to* `csrc/`,
 not a replacement: the sources stay in the repository because a generated
-standalone C program links `clap_host.c` directly, with no Julia present.
-`clap_lib_path()` gives the prebuilt library's absolute path and `clap_src_path()`
-the source it was built from; `CLAPHost_jll`'s version tracks the release of this
-package whose `csrc/` it was built from.
+standalone C program links them directly, with no Julia present.
+`clap_lib_path()` / `lv2_lib_path()` give the prebuilt libraries' absolute paths
+and `clap_src_path()` / `lv2_src_path()` the sources they were built from; each
+JLL's version tracks the release of this package whose `csrc/` it was built from.
+`LV2Host_jll` depends on `Lilv_jll`, which brings `Serd_jll`, `Sord_jll`,
+`Sratom_jll`, `Zix_jll` and `lv2_jll` — the JLLs that made discovery possible.
 
 `CLAPHost_jll` 1.0.1 builds for Linux, macOS and Windows, so in-process hosting runs on
 all three. Where a platform has no build, the package still loads and authors plugins,
@@ -45,9 +58,11 @@ all three. Where a platform has no build, the package still loads and authors pl
 as the test probes do.
 
 The only things that need a C compiler are building the *test* plugins
-(`clap_test_bundle()`), which go into a per-package scratch space, and authoring
-your own with `export_plugin`. A read-only installation hosts plugins fine and
-fails only at test or export time, with a message that says so.
+(`clap_test_bundle()`, `lv2_test_bundle()`), which go into a per-package scratch
+space, and authoring your own with `export_plugin`. A read-only installation hosts
+plugins fine and fails only at test or export time, with a message that says so. The C
+sources are also compiled and probed directly in CI (`.github/workflows/CProbe.yml`),
+with no Julia involved.
 
 To work on `csrc/clap_host.c` itself, build it locally and point the JLL at your
 build through a preference, then restart Julia:
@@ -108,17 +123,21 @@ that simply is not continuous audio.
 
 ## Testing without third-party binaries
 
-`test/plugins/ap_test_plugins.c` is a CLAP bundle written for this repository: a gain, a
-one-pole filter, and a 16-sample lookahead. Hosting is only proved by hosting something,
-and depending on a third-party plugin would make the suite rest on a binary whose
-arithmetic cannot be checked and may not even be fetchable. Because these are ours, every
-expectation is arithmetic rather than a recording:
+`test/plugins/ap_test_plugins.c` is a CLAP bundle written for this repository, and
+`test/plugins/ap_test_lv2.c` + `ap_test_lv2.ttl` the same three plugins as an LV2
+bundle: a gain, a one-pole filter, and a 16-sample lookahead. Hosting is only proved by
+hosting something, and depending on a third-party plugin would make the suite rest on a
+binary whose arithmetic cannot be checked and may not even be fetchable. Because these
+are ours, every expectation is arithmetic rather than a recording:
 
 - `ap.gain` — output equals input times the gain, sample-exactly;
 - `ap.onepole` — two consecutive blocks equal one continuous run over the concatenated
   input, which is what proves state survives block boundaries;
 - `ap.lookahead` — reported latency is real and is surfaced rather than silently
   absorbed (and compensates sample-exactly under `compensate_latency = true`).
+
+The LV2 suite additionally scans the machine's system LV2 directories when it has any
+(`/usr/lib/lv2` and friends) and asserts that lilv enumerates what is installed.
 
 ## Authoring: from a step function to a plugin
 
@@ -267,17 +286,24 @@ own state, so it carries across blocks like everything else.
 Not yet: privatised (coexisting) Julia steps on Windows, see above; Julia-step bundling is
 tested on Linux and Windows, not on macOS.
 
-## LV2 discovery is missing, and why
+## LV2: what discovery gives you, and what the host refuses
 
-The LV2 *audio* path is genuinely simpler than CLAP's — one ISC header, ports connected
-once by index, then `run(n_samples)`. Discovery is the problem: LV2 metadata lives in
-Turtle/RDF manifests, which in practice means `lilv`, which needs `serd`, `sord` and
-`sratom`. Julia's General registry currently has only `Serd_jll`.
+LV2 metadata lives in Turtle manifests next to the binary, and this host reads them
+through [lilv](https://gitlab.com/lv2/lilv), the reference reader, rather than a
+hand-rolled parser that could silently mis-map a port. A plugin is named by URI;
+`lv2_params()` returns its control input ports (id = port index, name, symbol, range,
+default) as read from the manifest; latency comes from the plugin's designated
+`lv2:latency` port. Search paths go through `lv2_default_path(dirs...)`, which appends
+the LV2 specification bundles from `lv2_jll` so lilv has the vocabulary to classify what
+it finds.
 
-So the audio path here takes the port map as explicit arguments instead. A half-correct
-hand-rolled Turtle parser that silently mis-maps a port would be worse than no discovery at
-all. The fix is Yggdrasil recipes for the missing JLLs, which would benefit every Julia
-audio project rather than only this one.
+The host offers four features (`urid:map`, `urid:unmap`, `bufsz:fixedBlockLength`,
+`bufsz:boundedBlockLength`) and connects audio and control ports. A plugin that
+*requires* anything else — an atom, CV or event port, or another host feature — is
+refused at `lv2_open!` with a message that says which. An unconnected required port is
+undefined behaviour in the LV2 specification, so refusing is the honest answer; plugins
+with only optional extras open fine. Parameter changes are written to the control port
+the plugin reads at `run()`, so a change lands on exactly the block it is passed with.
 
 ## Known limits
 
@@ -291,8 +317,10 @@ audio project rather than only this one.
 - **Reported latency is surfaced, not compensated, by default.** `clap_open!` accepts
   `compensate_latency = true`, an opt-in Julia-side mode that aligns the stream:
   `clap_out` then returns block k aligned with input block k and `clap_flush!` yields
-  the tail. The C hosts (`csrc/`) stay uncompensated — a generated C program linking
-  them directly never sees the mode.
+  the tail. `lv2_open!` has no such option: `lv2_latency()` reports what the plugin
+  writes to its `lv2:latency` port and aligning the stream is the caller's job. The C
+  hosts (`csrc/`) stay uncompensated — a generated C program linking them directly never
+  sees the mode.
 
 ## Licence
 

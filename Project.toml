@@ -1,12 +1,14 @@
 name = "AudioPlugins"
 uuid = "83119930-5344-4127-8689-15f5870d6d1a"
 authors = ["JuliaHub, Inc. and contributors"]
-version = "1.1.3"
+version = "1.2.0"
 
 [deps]
 CLAPHost_jll = "c9c4f589-041a-5a1c-a149-a4cdc6e5211b"
+LV2Host_jll = "a1fb6e78-af1d-557a-bd91-b38940fc92f3"
 Scratch = "6c6a2e73-6563-6170-7368-637461726353"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+lv2_jll = "7b3f7994-2f4c-56ea-8c5f-7c434df6080d"
 
 [weakdeps]
 JuliaC = "acedd4c2-ced6-4a15-accc-2607eb759ba2"
@@ -17,6 +19,7 @@ AudioPluginsJuliaCExt = "JuliaC"
 [compat]
 CLAPHost_jll = "1.0"
 JuliaC = "0.3"
+LV2Host_jll = "1.1"
 Libdl = "1"
 SafeTestsets = "0.1"
 SciMLTesting = "2.13"
@@ -24,6 +27,7 @@ Scratch = "1"
 TOML = "1"
 Test = "1"
 julia = "1.10"
+lv2_jll = "1.18"
 
 [extras]
 JuliaC = "acedd4c2-ced6-4a15-accc-2607eb759ba2"

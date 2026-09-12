@@ -102,6 +102,80 @@ CLAP_WAVE_RAMP
 CLAP_WAVE_IMPULSE
 ```
 
+## LV2 hosting: the library
+
+```@docs
+lv2_lib_path
+lv2_src_path
+lv2_default_path
+lv2_test_bundle
+```
+
+## LV2 hosting: lifecycle and discovery
+
+```@docs
+lv2_scan
+lv2_open!
+lv2_close!
+lv2_is_open
+lv2_plugin_name
+lv2_plugin_uri
+lv2_last_error
+```
+
+## LV2 hosting: configuration in force
+
+```@docs
+lv2_block_size
+lv2_sample_rate
+lv2_channels
+lv2_latency
+lv2_n_process
+lv2_reset_counters!
+```
+
+## LV2 hosting: parameters
+
+An LV2 parameter is a control input port, so its `id` is a port index rather
+than a format-assigned id, and its value is in the port's own plain units.
+
+```@docs
+lv2_params
+lv2_param_count
+lv2_param_value
+```
+
+## LV2 hosting: audio in and out
+
+```@docs
+lv2_fill!
+lv2_out
+```
+
+## LV2 node-side operators
+
+The LV2 half of the node-side surface, shaped exactly like the CLAP one above.
+
+```@docs
+AudioPlugins.lv2_in_tone
+AudioPlugins.lv2_process
+AudioPlugins.lv2_in_sample
+AudioPlugins.lv2_out_sample
+AudioPlugins.lv2_out_rms
+AudioPlugins.lv2_out_peak
+AudioPlugins.lv2_out_valid
+```
+
+### LV2 waveform codes
+
+```@docs
+LV2_WAVE_SILENCE
+LV2_WAVE_SINE
+LV2_WAVE_SQUARE
+LV2_WAVE_RAMP
+LV2_WAVE_IMPULSE
+```
+
 ## Authoring: the descriptor
 
 ```@docs

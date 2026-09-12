@@ -37,7 +37,7 @@ run_qa(
                 :parse, :shell_split,
                 # The JLL interface JLLWrappers generates. Every JLL has these and no
                 # JLL declares them `public`.
-                :is_available, :libclap_host_path,
+                :is_available, :libclap_host_path, :liblv2_host_path,
                 # JuliaC's rpath constants, which any caller of `LinkRecipe` has to
                 # name; not declared `public` in JuliaC.
                 :RPATH_BUNDLE, :RPATH_JULIA,
