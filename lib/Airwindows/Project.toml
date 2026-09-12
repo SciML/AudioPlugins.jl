@@ -1,0 +1,23 @@
+name = "Airwindows"
+uuid = "9cc1a618-9a92-4798-b2a9-a332ae69385c"
+authors = ["JuliaHub, Inc. and contributors"]
+version = "1.0.0"
+
+[deps]
+AudioPlugins = "83119930-5344-4127-8689-15f5870d6d1a"
+Airwindows_jll = "6aebe50b-6f12-57f2-91ff-3cc085acc4c7"
+
+[sources]
+AudioPlugins = {path = "../.."}
+
+[compat]
+Airwindows_jll = "1.0"
+AudioPlugins = "1.1.3"
+Test = "1"
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

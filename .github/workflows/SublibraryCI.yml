@@ -1,0 +1,21 @@
+# The lib/<name> sublibraries. Each is its own package with its own Project.toml,
+# tested against the parent through [sources]; the reusable workflow computes which
+# ones a diff affects and expands each into its own test matrix.
+#
+# The sublibraries here are plugin collections: a JLL of third-party effects plus the
+# handful of lines that register it with AudioPlugins. They are separate packages so
+# that installing AudioPlugins pulls none of them in.
+name: Sublibrary CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+jobs:
+  sublibrary-ci:
+    uses: "SciML/.github/.github/workflows/sublibrary-project-tests.yml@v1"
+    with:
+      group-env-name: GROUP
+    secrets: "inherit"
