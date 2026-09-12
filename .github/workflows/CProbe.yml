@@ -1,7 +1,9 @@
 # The C/C++ hosts, compiled and probed directly, with no Julia involved:
 # the same sources Yggdrasil builds into CLAPHost_jll / LV2Host_jll /
 # VST3Host_jll, and the ones a generated standalone program links.
-# test/probe*.c host the package's own test plugins and check arithmetic.
+# test/probe*.c host the package's own test plugins and check arithmetic --
+# except probe_airwindows.c, which hosts csrc/airwindows, the adapter in this
+# repository that Yggdrasil builds into Airwindows_jll.
 name: C probes
 on:
   push:
@@ -42,6 +44,38 @@ jobs:
           c++ -std=c++17 -O2 -fPIC -shared -fvisibility=hidden -DRELEASE=1 -I$SDK -o ap_test.vst3/Contents/x86_64-linux/ap_test.so test/plugins/ap_test_vst3.cpp $SDK/public.sdk/source/vst/vstsinglecomponenteffect.cpp $SDK/public.sdk/source/main/linuxmain.cpp -L$L -lsdk -lsdk_common -lbase -lpluginterfaces -lpthread -Wl,--no-undefined
           cc -std=gnu99 -O2 -Wall -Wextra -o probe_vst3 test/probe_vst3.c ./libvst3_host.so -lm -Wl,-rpath,$PWD
           ./probe_vst3 "$PWD/ap_test.vst3"
+  # csrc/airwindows, the Airwindows collection as one 504-plugin CLAP module.
+  # Its own job because building airwin-registry is 527 translation units and
+  # nothing else here waits on it. The registry is MIT; only that target is
+  # built, so no GPL3 JUCE or Rack material is compiled or linked.
+  probe-airwindows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install cmake and a C++ toolchain
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+      - name: airwin2rack (MIT, airwin-registry only)
+        run: |
+          # Pinned to a commit rather than a tag: probe_airwindows.c asserts
+          # the registry size, so a moving tag would turn an upstream addition
+          # into a red build on an unrelated PR. Bump this and AW_N_PLUGINS
+          # together. A shallow fetch of one SHA needs init + fetch; git clone
+          # cannot shallow-clone a commit that is not a branch tip.
+          COMMIT=2a6d1c019e1b54a0376d479edf083694369f78b1
+          mkdir aw && cd aw
+          git init -q
+          git remote add origin https://github.com/baconpaul/airwin2rack
+          git fetch -q --depth 1 origin $COMMIT
+          git checkout -q FETCH_HEAD
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel 4 --target airwin-registry
+      - name: Airwindows
+        run: |
+          AW=$PWD/aw
+          c++ -std=c++17 -O2 -fPIC -shared -fvisibility=hidden -Wall -Wextra -isystem $AW/src -o Airwindows.clap csrc/airwindows/airwindows_clap.cpp -L$AW/build -lairwin-registry -lawdoc_resources -Wl,--no-undefined
+          cc -std=gnu99 -O2 -Wall -Wextra -o probe_airwindows test/probe_airwindows.c csrc/clap_host.c -ldl -lm
+          ./probe_airwindows "$PWD/Airwindows.clap"
+
   # The Windows build of the CLAP host, with the same mingw-w64 gcc Yggdrasil
   # uses for CLAPHost_jll. A native run is the only check of the LoadLibrary
   # path, so this compiles the test bundle as a .clap DLL and hosts it.
