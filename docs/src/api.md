@@ -102,6 +102,85 @@ CLAP_WAVE_RAMP
 CLAP_WAVE_IMPULSE
 ```
 
+## VST3 hosting: the library
+
+```@docs
+vst3_lib_path
+vst3_src_path
+vst3_test_bundle
+```
+
+## VST3 hosting: lifecycle and discovery
+
+A VST3 class is named by a 32-hex-character class id, which is what
+[`vst3_scan`](@ref) lists and [`vst3_open!`](@ref) takes.
+
+```@docs
+vst3_scan
+vst3_open!
+vst3_close!
+vst3_is_open
+vst3_plugin_name
+vst3_plugin_id
+vst3_last_error
+```
+
+## VST3 hosting: configuration in force
+
+```@docs
+vst3_block_size
+vst3_sample_rate
+vst3_channels
+vst3_latency
+vst3_n_process
+vst3_reset_counters!
+```
+
+## VST3 hosting: parameters
+
+VST3 parameter values crossing the processing boundary are **normalised to
+`0..1`**; the controller's plain range is reported for information and the two
+conversions below move between the two.
+
+```@docs
+vst3_params
+vst3_param_count
+vst3_param_value
+vst3_param_plain
+vst3_param_normalized
+```
+
+## VST3 hosting: audio in and out
+
+```@docs
+vst3_fill!
+vst3_out
+```
+
+## VST3 node-side operators
+
+The VST3 half of the node-side surface, shaped exactly like the CLAP one above.
+
+```@docs
+AudioPlugins.vst3_in_tone
+AudioPlugins.vst3_process
+AudioPlugins.vst3_in_sample
+AudioPlugins.vst3_out_sample
+AudioPlugins.vst3_out_rms
+AudioPlugins.vst3_out_peak
+AudioPlugins.vst3_out_valid
+```
+
+### VST3 waveform codes
+
+```@docs
+VST3_WAVE_SILENCE
+VST3_WAVE_SINE
+VST3_WAVE_SQUARE
+VST3_WAVE_RAMP
+VST3_WAVE_IMPULSE
+```
+
 ## Authoring: the descriptor
 
 ```@docs

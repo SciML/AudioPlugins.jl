@@ -236,6 +236,13 @@ set_preferences!(CLAPHost_jll, "libclap_host_path" => "/path/to/libclap_host.so"
 [`build_clap_host!`](@ref) is a deprecated no-op kept for callers written against the 1.0
 API; it returns [`clap_lib_path`](@ref).
 
+The VST3 host ships the same way, as `VST3Host_jll`: [`vst3_lib_path`](@ref) and
+[`vst3_src_path`](@ref) are its equivalents. The VST3 SDK itself is **not** vendored —
+it is a source tree of a different order of magnitude than the CLAP and LV2 headers.
+`vst3sdk_jll` builds it once (pinned to `v3.8.1_build_84`, MIT) and `VST3Host_jll`
+compiles `csrc/vst3_host.cpp` against it as a build dependency, so the host library is
+self-contained and exports only its `extern "C"` surface.
+
 ## Testing without third-party binaries
 
 `test/plugins/ap_test_plugins.c` is a CLAP bundle written for this repository. Hosting is
@@ -248,6 +255,55 @@ Because these are ours, every expectation is arithmetic rather than a recording:
     input, which is what proves state survives block boundaries;
   - `ap.lookahead` — reported latency is real, and is surfaced rather than silently
     absorbed.
+
+## VST3
+
+A `.vst3` bundle is a shared object with a class factory, so discovery is a factory
+walk rather than a manifest read and needs no extra library. [`vst3_scan`](@ref) lists
+the audio-effect classes it exports:
+
+```julia
+using AudioPlugins
+
+vst3_scan("/usr/lib/vst3/SomePlugin.vst3")
+# Vector{@NamedTuple{id::String, name::String, category::String}}
+```
+
+`id` is the class id as 32 hex characters, and is what [`vst3_open!`](@ref) takes;
+`""` opens the first audio-effect class:
+
+```julia
+vst3_open!(path; class_id = id, sample_rate = 48000, block_size = 64, channels = 1)
+
+vst3_plugin_name()
+vst3_params()   # id, name, normalized/plain range and default, step count, flags
+```
+
+VST3 parameters are **normalised**: the plugin sees every parameter as a `Float64` in
+`[0, 1]`, and the controller owns the mapping to the plain value a user would read.
+[`vst3_params`](@ref) reports the plain range and default, and
+[`vst3_param_plain`](@ref) / [`vst3_param_normalized`](@ref) convert between the two,
+so a caller can work in whichever it prefers. Parameter changes are queued as
+`inputParameterChanges` on the block they are passed with, which is how VST3 wants
+them delivered.
+
+[`vst3_latency`](@ref) is `IAudioProcessor::getLatencySamples()`, re-read whenever the
+plugin asks for a restart with `kLatencyChanged`; as with CLAP by default and with LV2,
+it is surfaced rather than compensated.
+
+The host asks for mono or stereo on the plugin's main buses and deactivates the others
+(a sidechain input, event buses). It processes 32-bit float only, and a plugin that
+refuses the arrangement, refuses `setupProcessing`, or refuses `setActive` fails at
+[`vst3_open!`](@ref), loudly. No editor is ever created, and everything is called from
+whichever thread calls it — VST3's main-thread/processing-thread split is not modelled.
+
+[`vst3_test_bundle`](@ref) compiles the same three test plugins as a VST3 bundle,
+against the SDK from `vst3sdk_jll`, so the VST3 path is proved against arithmetic that
+can be checked rather than against a third-party binary.
+
+The bundle registry above is CLAP-only: [`register_bundle!`](@ref) scans a `.clap`
+module and [`plugins`](@ref) reports what CLAP declares. Name the bundle path at
+[`vst3_open!`](@ref) instead.
 
 ## LV2 discovery
 

@@ -26,6 +26,12 @@ os = ["ubuntu-latest", "macos-latest", "windows-latest"]
 versions = ["lts", "1"]
 os = ["ubuntu-latest", "macos-latest", "windows-latest"]
 
+# The VST3 host: discovery, then hosting the VST3 test bundle built against
+# the SDK from vst3sdk_jll.
+[VST3]
+versions = ["lts", "1"]
+os = ["ubuntu-latest", "macos-latest", "windows-latest"]
+
 # Aqua / ExplicitImports / public-API docs. Centrally clamped to julia "1".
 [QA]
 versions = ["1"]
