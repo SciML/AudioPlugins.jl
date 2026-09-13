@@ -29,7 +29,7 @@ and to author your own ([`export_plugin`](@ref)).
 | Format | Licence | State |
 |---|---|---|
 | **CLAP** | MIT, header-only | host implemented and tested — discovery, instantiation, parameters, block processing, latency. The one format [`export_plugin`](@ref) builds. |
-| **LV2** | ISC | audio path implemented in C (`connect_port` / `run`); discovery is not — see [LV2 discovery](@ref) |
+| **LV2** | ISC | host implemented in C, discovery included — see [LV2 discovery goes through lilv](@ref) |
 | VST3 | MIT since SDK 3.8 | not yet implemented |
 
 ## The processing contract

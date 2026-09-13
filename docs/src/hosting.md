@@ -249,15 +249,26 @@ Because these are ours, every expectation is arithmetic rather than a recording:
   - `ap.lookahead` — reported latency is real, and is surfaced rather than silently
     absorbed.
 
-## LV2 discovery
+## LV2 discovery goes through lilv
 
-The LV2 *audio* path is implemented in C (`csrc/lv2_host.c`) and is genuinely simpler
-than CLAP's — one ISC header, ports connected once by index, then `run(n_samples)`.
-Discovery is the problem: LV2 metadata lives in Turtle/RDF manifests, which in practice
-means `lilv`, which needs `serd`, `sord` and `sratom`, and Julia's General registry
-currently has only `Serd_jll`.
+LV2 metadata — which port index is audio in, which is a control and what its range is —
+lives in Turtle/RDF manifests next to the binary rather than in the binary, which in
+practice means `lilv`. `csrc/lv2_host.c` uses it, and does rather more than the audio
+path:
 
-So the audio path takes the port map as explicit arguments instead. A half-correct
-hand-rolled Turtle parser that silently mis-mapped a port would be worse than no
-discovery at all. The fix is Yggdrasil recipes for the missing JLLs, which would benefit
-every Julia audio project rather than only this one.
+  - `lv2_host_scan(lv2_path)` loads every bundle under a search path and enumerates the
+    plugins, readable back by URI and name;
+  - `lv2_host_open(lv2_path, uri, …)` classifies every port with `lilv_port_is_a`, reads
+    control ranges out of the manifest, finds the designated `lv2:latency` port, and
+    connects every port itself — so a caller names a plugin by URI and never sees a port
+    index;
+  - a plugin that requires a host feature this host does not provide, or an atom, CV or
+    event port that is not `connectionOptional`, is refused at open with a message saying
+    which. An unconnected required port is undefined behaviour in the LV2 spec, so
+    refusing is the honest answer.
+
+Every JLL that needs exists today — `Lilv_jll`, `Serd_jll`, `Sord_jll`, `Sratom_jll`,
+`lv2_jll` and `Zix_jll` — so nothing about the format is blocked. The Julia layer over
+this host is not on `main` yet; until it is, LV2 is reached the way `test/probe_lv2.c`
+reaches it, from C linking `csrc/lv2_host.c` against lilv, which the `C probes` workflow
+runs on every pull request.
