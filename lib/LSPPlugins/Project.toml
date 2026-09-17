@@ -1,0 +1,23 @@
+name = "LSPPlugins"
+uuid = "92a2e151-26df-43ce-a7a1-a77031d33d1f"
+authors = ["JuliaHub, Inc. and contributors"]
+version = "1.0.0"
+
+[deps]
+AudioPlugins = "83119930-5344-4127-8689-15f5870d6d1a"
+LSPPlugins_jll = "bd907876-5a95-57f8-bbfb-e213ea758c73"
+
+[sources]
+AudioPlugins = {path = "../.."}
+
+[compat]
+AudioPlugins = "1.1.3"
+LSPPlugins_jll = "1.2.35"
+Test = "1"
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
