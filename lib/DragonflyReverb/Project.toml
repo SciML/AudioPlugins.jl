@@ -1,0 +1,23 @@
+name = "DragonflyReverb"
+uuid = "3f37e322-345f-4d65-ad90-7ccaf7a8ddb7"
+authors = ["JuliaHub, Inc. and contributors"]
+version = "1.0.0"
+
+[deps]
+AudioPlugins = "83119930-5344-4127-8689-15f5870d6d1a"
+DragonflyReverb_jll = "701bd1d5-8e0a-5316-8dde-a308c88bc96e"
+
+[sources]
+AudioPlugins = {path = "../.."}
+
+[compat]
+AudioPlugins = "1.1.3"
+DragonflyReverb_jll = "3.2.10"
+Test = "1"
+julia = "1.10"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
