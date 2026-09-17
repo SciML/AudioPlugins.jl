@@ -20,8 +20,9 @@ jobs:
         run: |
           cc -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -o ap_test.clap test/plugins/ap_test_plugins.c
           cc -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -o ap_many.clap test/plugins/ap_test_many.c
+          cc -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -o ap_manyparams.clap test/plugins/ap_test_manyparams.c
           cc -std=gnu99 -O2 -Wall -Wextra -o probe test/probe.c csrc/clap_host.c -ldl -lm
-          ./probe "$PWD/ap_test.clap" /lib/x86_64-linux-gnu/libm.so.6 "$PWD/ap_many.clap"
+          ./probe "$PWD/ap_test.clap" /lib/x86_64-linux-gnu/libm.so.6 "$PWD/ap_many.clap" "$PWD/ap_manyparams.clap"
       - name: LV2
         run: |
           mkdir -p lv2/ap_test.lv2

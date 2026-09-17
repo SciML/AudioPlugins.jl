@@ -50,6 +50,9 @@ extern "C" {
 #define CLAP_HOST_MAX_BLOCK   8192
 #define CLAP_HOST_MAX_CHAN    2
 #define CLAP_HOST_MAX_PARAMS  64
+/* Parameters clap_process() itself carries, as (id, value) argument pairs.
+ * Not the number a block can drive: clap_set_param() chains, and is what a
+ * plugin with more parameters than this uses. */
 #define CLAP_HOST_PARAM_SLOTS 4
 
 /* Sizes of the per-plugin descriptor cache a scan fills. The number of
@@ -116,6 +119,12 @@ const char *clap_host_last_error(void);
 /* Which plugin is loaded, or "" -- for logs and for a driver that wants to
  * assert it opened what it meant to. */
 const char *clap_host_plugin_name(void);
+
+/* Its index within the descriptor list of the bundle that was scanned to
+ * open it, or -1 when nothing is open. The node-side counterpart is
+ * clap_expect(), which is how a model built against one plugin refuses to
+ * process through another. */
+long clap_host_open_index(void);
 
 /* ------------------------------------------------------------------ *
  * Parameter discovery. The ids are what the node passes to
@@ -200,11 +209,42 @@ double clap_in_sample(double dep, double i, double ch);
  * id, so a held-constant parameter costs one event on the first block and
  * none afterwards.
  *
+ * Four is a floor, not a ceiling: clap_set_param() below drives any number
+ * of parameters by chaining, and the two may be mixed -- the slots and the
+ * chain keep separate change-detection state, so driving the same id through
+ * both in one block is the one combination that will send two events.
+ *
  * Returns NaN when nothing is open or when `dep` does not name the current
  * input block. */
 double clap_process(double dep,
                     double id0, double v0, double id1, double v1,
                     double id2, double v2, double id3, double v3);
+
+/* Queue one parameter change for the block named by `dep` and return `dep`,
+ * so that driving parameters is a dependency chain: one call per parameter,
+ * each taking the previous one's result, and the last one's result passed to
+ * clap_process(). That is what lifts the CLAP_HOST_PARAM_SLOTS limit -- a
+ * plugin with thirteen parameters is thirteen equations rather than four --
+ * and it is a chain rather than a set of independent calls because a
+ * synchronous program orders by data dependency and by nothing else.
+ *
+ * Same change-detection rule as the clap_process() slots, keyed by id: a
+ * value equal to the last one sent for that id queues no event, so a held
+ * parameter costs one event on the first block and none after.
+ *
+ * Refuses with NaN -- rather than processing something plausible -- when
+ * nothing is open, when `dep` does not name the current input block, when
+ * `id` is not a parameter the open plugin declares, when `value` is NaN, or
+ * when the queue is full. Filling a new input block abandons whatever chain
+ * was pending, so a refused chain cannot leak into the next block. */
+double clap_set_param(double dep, double id, double value);
+
+/* Return `dep` when the plugin at descriptor `index` of the scanned bundle
+ * is the one open, and NaN otherwise -- the guard a generated per-plugin
+ * component puts in front of its parameter chain, so that a model built for
+ * one effect refuses rather than silently processing through whichever
+ * effect the driver happened to open. NaN in, NaN out. */
+double clap_expect(double dep, double index);
 
 /* Read the output block. NaN when `dep` does not name the current output
  * block, which is what makes a stale token a visible error rather than a

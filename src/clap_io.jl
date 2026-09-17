@@ -28,10 +28,12 @@
 
 
 export build_clap_host!, clap_host_available, clap_lib_path, clap_src_path, clap_scan,
+    clap_descriptors,
     clap_open!, clap_close!,
     clap_is_open, clap_last_error, clap_plugin_name,
     clap_params, clap_param_count, clap_latency, clap_compensating, clap_flush!,
     clap_block_size, clap_sample_rate, clap_n_process, clap_reset_counters!,
+    clap_plugin_index,
     clap_fill!, clap_out, clap_test_bundle,
     CLAP_WAVE_SILENCE, CLAP_WAVE_SINE, CLAP_WAVE_SQUARE,
     CLAP_WAVE_RAMP, CLAP_WAVE_IMPULSE
@@ -249,6 +251,50 @@ function clap_scan(path::AbstractString)
 end
 
 """
+    clap_descriptors(path) -> Vector{@NamedTuple{id, name, vendor, version, description, features}}
+
+Everything a `.clap` bundle's descriptors declare, for the plugins in it, in
+factory order. [`clap_scan`](@ref) is the same enumeration reduced to what
+opening a plugin needs; this is what a *generator* needs — a per-effect
+component library takes its docstrings, its grouping and its version pin from
+these fields, and reading them from the module is what keeps the generated
+library honest about which build it was generated from.
+
+`features` is the plugin's CLAP feature list, which is where a collection's own
+taxonomy usually appears: the Airwindows adapter emits `airwindows:<category>`
+alongside the standard keywords. It truncates at twelve entries.
+
+Scans, so it closes whatever plugin is open — the same caveat as
+[`clap_scan`](@ref).
+"""
+function clap_descriptors(path::AbstractString)
+    _COMP[] = nothing
+    n = ccall((:clap_host_scan, CLAP_LIB), Clong, (Cstring,), path)
+    n < 0 && error("clap_descriptors($(repr(path))) failed: $(clap_last_error())")
+    # Written out rather than looped over a symbol, for the reason clap_params
+    # gives: a ccall's function name is part of its syntax and cannot come from
+    # a variable.
+    return [
+        (
+            id = unsafe_string(ccall((:clap_host_scan_id, CLAP_LIB), Cstring, (Clong,), i)),
+            name = unsafe_string(ccall((:clap_host_scan_name, CLAP_LIB), Cstring, (Clong,), i)),
+            vendor = unsafe_string(ccall((:clap_host_scan_vendor, CLAP_LIB), Cstring, (Clong,), i)),
+            version = unsafe_string(ccall((:clap_host_scan_version, CLAP_LIB), Cstring, (Clong,), i)),
+            description = unsafe_string(
+                ccall((:clap_host_scan_description, CLAP_LIB), Cstring, (Clong,), i)
+            ),
+            features = [
+                unsafe_string(
+                    ccall((:clap_host_scan_feature, CLAP_LIB), Cstring, (Clong, Clong), i, k)
+                )
+                    for k in 0:(ccall((:clap_host_scan_n_features, CLAP_LIB), Clong, (Clong,), i) - 1)
+            ],
+        )
+            for i in 0:(n - 1)
+    ]
+end
+
+"""
     clap_open!(path; plugin_id = "", sample_rate = 48000, block_size = 512,
                channels = 1, compensate_latency = false)
     clap_open!(plugin_id; sample_rate = 48000, block_size = 512,
@@ -323,6 +369,16 @@ clap_last_error() = unsafe_string(ccall((:clap_host_last_error, CLAP_LIB), Cstri
 Name the open plugin reports for itself, or an empty string when nothing is open.
 """
 clap_plugin_name() = unsafe_string(ccall((:clap_host_plugin_name, CLAP_LIB), Cstring, ()))
+
+"""
+    clap_plugin_index() -> Int
+
+Index of the open plugin within the bundle it was opened from — the `index`
+field [`plugins`](@ref) reports — or `-1` when nothing is open. It is what
+[`clp_expect`](@ref AudioPlugins.clp_expect) compares against, so a driver can
+assert node-side and driver-side agree on which plugin is meant.
+"""
+clap_plugin_index() = Int(ccall((:clap_host_open_index, CLAP_LIB), Clong, ()))
 
 """
     clap_is_open() -> Bool
@@ -658,6 +714,60 @@ clp_process(dep, id0, v0, id1, v1, id2, v2, id3, v3) =
     ),          # slots 2, 3
     dep, id0, v0, id1, v1, id2, v2, id3, v3
 )
+
+"""
+    AudioPlugins.clp_set(dep, id, value) -> token
+
+Queue parameter `id` of the open plugin at `value` for the block named by
+`dep`, and return `dep`, so that driving parameters is a *chain*: one equation
+per parameter, each taking the previous one's result, with the last one's
+result passed to [`clp_process`](@ref AudioPlugins.clp_process).
+
+This is what lifts the four-slot limit of `clp_process`. A plugin with thirteen
+parameters is thirteen equations, not four, and it is a chain rather than
+thirteen independent calls because a synchronous program orders by data
+dependency and by nothing else — an unchained call could be scheduled after the
+`process` it was meant to precede.
+
+The change-detection rule is `clp_process`'s, keyed by id: a value equal to the
+last one sent for that id queues no event, so a held parameter costs one event
+on the first block and none afterwards.
+
+Returns `NaN` when nothing is open, when `dep` does not name the current input
+block, when `id` is not a parameter the open plugin declares, when `value` is
+`NaN`, or when the queue is full. Filling a new input block abandons a pending
+chain, so a refused chain cannot leak into the next block.
+
+!!! note
+    Needs a host newer than `CLAPHost_jll` 1.0.1, which is a build of
+    `csrc/clap_host.c` from before this entry point existed. Against that host
+    the call fails to find the symbol; the C-level behaviour is covered by
+    `test/probe.c`, which compiles the source in this repository.
+"""
+clp_set(dep, id, value) =
+    ccall(
+    (:clap_set_param, CLAP_LIB), Cdouble, (Cdouble, Cdouble, Cdouble),
+    dep, id, value
+)
+
+"""
+    AudioPlugins.clp_expect(dep, index) -> token
+
+Return `dep` when the open plugin is the one at `index` in its bundle — the
+`index` field of [`plugins`](@ref) — and `NaN` otherwise.
+
+The guard a generated per-plugin component puts in front of its parameter
+chain. The host holds one plugin at a time and the driver is what opens it, so
+without this a model built for one effect processes through whichever effect
+happens to be open and returns numbers that look fine. `NaN` in, `NaN` out, so
+it composes with the rest of the refusal path.
+
+!!! note
+    Needs a host newer than `CLAPHost_jll` 1.0.1 — see
+    [`clp_set`](@ref AudioPlugins.clp_set).
+"""
+clp_expect(dep, index) =
+    ccall((:clap_expect, CLAP_LIB), Cdouble, (Cdouble, Cdouble), dep, index)
 
 """
     AudioPlugins.clp_out_rms(dep) -> Float64

@@ -14,6 +14,33 @@ const AP = AudioPlugins
 
 const BUNDLE = clap_test_bundle()
 
+# CLAPHost_jll ships a prebuilt build of `csrc/clap_host.c`, so a change to that
+# source reaches Julia only once the JLL has been rebuilt and the compat bound
+# raised. The chained-parameter tests are gated on the host actually exporting
+# the entry point rather than on a version number: the C-level coverage that
+# runs on every PR is `test/probe.c`, which compiles the source in this
+# repository, and these switch themselves on when the JLL catches up.
+const HOST_HAS_CHAIN = clap_host_available() && let h = Libdl.dlopen(clap_lib_path())
+    ok = Libdl.dlsym_e(h, :clap_set_param) != C_NULL
+    Libdl.dlclose(h)
+    ok
+end
+
+# The eight-parameter fixture, built once. It is not part of `clap_test_bundle`
+# because that bundle's contents are documented and exercised by the README:
+# widening it would rewrite examples that have nothing to do with parameters.
+const MANY_DIR = Ref{String}("")
+function many_bundle()
+    isempty(MANY_DIR[]) && (MANY_DIR[] = mktempdir())
+    out = joinpath(MANY_DIR[], "ap_manyparams.clap")
+    if !isfile(out)
+        cc = AP._c_compiler()
+        src = joinpath(@__DIR__, "plugins", "ap_test_manyparams.c")
+        run(`$cc $(AP._c_arch_flags()) -O2 -fPIC -shared -Wall -Wextra -o $out $src`)
+    end
+    return out
+end
+
 sha_free(x) = x  # (no fixtures to checksum: the plugin is built from source here)
 
 if !clap_host_available()
@@ -320,6 +347,98 @@ else
             o = AP.clp_process(t, 0, 0.25, -1, 0, -1, 0, -1, 0)
             first_of_fresh = clap_out(o)[1]
             @test first_of_fresh ≈ 0.25 atol = 1.0e-6    # y = 0 + 0.25*(1-0)
+        end
+
+        if !HOST_HAS_CHAIN
+            @info "CLAPHost_jll $(clap_lib_path()) predates clap_set_param: the chained " *
+                "parameter and clp_expect tests are covered by test/probe.c until it is rebuilt"
+        else
+            @testset "a parameter chain drives more parameters than there are slots" begin
+                # ap.weights has eight parameters and clap_process has four slots,
+                # so this is the case the chain exists for. The weights are powers
+                # of two, so the assertion pins down which value reached which id
+                # rather than only that eight numbers arrived.
+                many = many_bundle()
+
+                clap_open!(many; sample_rate = 48000, block_size = 8, channels = 1)
+                @test clap_param_count() == 8
+                @test clap_plugin_index() == 0
+
+                vals = [k / 16 for k in 0:7]
+                g = sum((2.0^k) * vals[k + 1] for k in 0:7)
+
+                tok = clap_fill!(ones(8))
+                for k in 0:7
+                    tok = AP.clp_set(tok, k, vals[k + 1])
+                end
+                y = clap_out(AP.clp_process(tok, -1, 0, -1, 0, -1, 0, -1, 0))
+                @test all(≈(g; rtol = 1.0e-6), y)
+
+                # Held across a block: the second block queues no event, and the
+                # output is the same -- change detection must not mean "forgotten".
+                tok = clap_fill!(ones(8))
+                for k in 0:7
+                    tok = AP.clp_set(tok, k, vals[k + 1])
+                end
+                y2 = clap_out(AP.clp_process(tok, -1, 0, -1, 0, -1, 0, -1, 0))
+                @test y2 == y
+
+                # One parameter moved, seven held.
+                tok = clap_fill!(ones(8))
+                for k in 0:7
+                    tok = AP.clp_set(tok, k, k == 7 ? 1.0 : vals[k + 1])
+                end
+                y3 = clap_out(AP.clp_process(tok, -1, 0, -1, 0, -1, 0, -1, 0))
+                @test all(≈(g + 128 * (1 - vals[8]); rtol = 1.0e-6), y3)
+            end
+
+            @testset "the chain and the four slots compose" begin
+                many = many_bundle()
+                clap_open!(many; sample_rate = 48000, block_size = 8, channels = 1)
+                # ids 0 and 1 through the slots, id 7 through the chain.
+                tok = AP.clp_set(clap_fill!(ones(8)), 7, 0.5)
+                y = clap_out(AP.clp_process(tok, 0, 1.0, 1, 1.0, -1, 0, -1, 0))
+                @test all(≈(1 + 2 + 64; rtol = 1.0e-6), y)
+            end
+
+            @testset "a chain refuses rather than guessing" begin
+                many = many_bundle()
+                clap_open!(many; sample_rate = 48000, block_size = 8, channels = 1)
+                tok = clap_fill!(ones(8))
+
+                @test isnan(AP.clp_set(tok, 8, 0.5))          # no such parameter
+                @test isnan(AP.clp_set(tok, -1, 0.5))         # nor a negative one
+                @test isnan(AP.clp_set(tok, 0, NaN))          # nor a value of NaN
+                @test isnan(AP.clp_set(tok + 1, 0, 0.5))      # nor a stale block
+                @test isnan(AP.clp_set(NaN, 0, 0.5))
+                # A refusal poisons the chain rather than being skipped over.
+                @test isnan(AP.clp_process(AP.clp_set(NaN, 0, 0.5), -1, 0, -1, 0, -1, 0, -1, 0))
+
+                # An abandoned chain does not leak into the next block: id 0 was
+                # queued and never processed, so the block that follows sees the
+                # plugin's own defaults and multiplies by zero.
+                AP.clp_set(tok, 0, 1.0)
+                tok2 = clap_fill!(ones(8))
+                y = clap_out(AP.clp_process(tok2, -1, 0, -1, 0, -1, 0, -1, 0))
+                @test all(iszero, y)
+            end
+
+            @testset "clp_expect refuses the wrong plugin" begin
+                # The host holds one plugin at a time and the driver is what opens
+                # it, so a model built for one plugin has to be able to say so.
+                clap_open!(BUNDLE; plugin_id = "ap.onepole", block_size = 8, channels = 1)
+                @test clap_plugin_index() == 1
+                tok = clap_fill!(ones(8))
+                @test AP.clp_expect(tok, 1) == tok
+                @test isnan(AP.clp_expect(tok, 0))
+                @test isnan(AP.clp_expect(tok, 2))
+                @test isnan(AP.clp_expect(NaN, 1))
+                # And the refusal reaches the output rather than stopping at the guard.
+                @test isnan(AP.clp_process(AP.clp_expect(tok, 0), 0, 0.25, -1, 0, -1, 0, -1, 0))
+                clap_close!()
+                @test clap_plugin_index() == -1
+                @test isnan(AP.clp_expect(1.0, 0))
+            end
         end
 
         @testset "closing is clean and idempotent" begin

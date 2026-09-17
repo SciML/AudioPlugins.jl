@@ -49,7 +49,10 @@ const char *clap_host_last_error(void) { return ERR; }
  * 2. State
  * ---------------------------------------------------------------- */
 
-#define EV_MAX CLAP_HOST_PARAM_SLOTS
+/* One event per declared parameter, plus the four legacy clap_process()
+ * slots, so a block that drives every parameter of the widest plugin this
+ * host will cache still cannot overflow the queue. */
+#define EV_MAX (CLAP_HOST_MAX_PARAMS + CLAP_HOST_PARAM_SLOTS)
 
 /* One plugin's descriptor, copied rather than pointed at: the strings belong
  * to the module, and a scan of a bundle we do not go on to open closes it. */
@@ -98,6 +101,16 @@ typedef struct {
      * not one per block. NaN means "nothing sent yet". */
     double slot_id[CLAP_HOST_PARAM_SLOTS];
     double slot_val[CLAP_HOST_PARAM_SLOTS];
+
+    /* The same, for clap_set_param, keyed by the parameter's position in
+     * the cache rather than by a slot: a chain names a parameter once and
+     * the position is what makes "has this one changed" answerable without
+     * the caller holding a slot open for it. */
+    double sent_val[CLAP_HOST_MAX_PARAMS];
+
+    /* Descriptor index of the open plugin within the last scan, -1 when
+     * nothing is open. What clap_expect() compares against. */
+    long   open_index;
 
     float  in[CLAP_HOST_MAX_CHAN][CLAP_HOST_MAX_BLOCK];
     float  out[CLAP_HOST_MAX_CHAN][CLAP_HOST_MAX_BLOCK];
@@ -443,10 +456,10 @@ int clap_host_open(const char *path, const char *plugin_id,
     }
 
     const char *want = (plugin_id && plugin_id[0]) ? plugin_id : S.desc[0].id;
-    int found = 0;
+    long which = -1;
     for (long i = 0; i < S.n_desc; i++)
-        if (strcmp(S.desc[i].id, want) == 0) { found = 1; break; }
-    if (!found) {
+        if (strcmp(S.desc[i].id, want) == 0) { which = i; break; }
+    if (which < 0) {
         set_err("no plugin with id '%s' in %s (it has %ld: first is '%s')",
                 want, path, S.n_desc, S.desc[0].id);
         clap_host_close();
@@ -503,6 +516,8 @@ int clap_host_open(const char *path, const char *plugin_id,
         S.slot_id[i]  = -1.0;
         S.slot_val[i] = NAN;
     }
+    for (long i = 0; i < CLAP_HOST_MAX_PARAMS; i++) S.sent_val[i] = NAN;
+    S.open_index = which;
     S.in_token = S.out_token = 0;
     S.in_n = S.out_n = 0;
     S.n_process = 0;
@@ -526,6 +541,7 @@ void clap_host_close(void) {
     S.latency = NULL;
     S.open = 0;
     S.n_params = 0;
+    S.open_index = -1;
     S.in_token = S.out_token = 0;
     S.in_n = S.out_n = 0;
     S.n_process = 0;
@@ -593,6 +609,7 @@ double clap_in_fill(const double *samples, long n, long channels) {
     for (long i = n; i < S.block; i++)
         for (long c = 0; c < S.chan; c++) S.in[c][i] = 0.0f;
     S.in_n = n;
+    S.ev_n = 0;                     /* a new block, so any pending chain is void */
     return (double)(++S.in_token);
 }
 
@@ -619,6 +636,7 @@ double clap_in_tone(double t, double waveform, double freq, double amp) {
         for (long c = 0; c < S.chan; c++) S.in[c][i] = (float)v;
     }
     S.in_n = S.block;
+    S.ev_n = 0;                     /* a new block, so any pending chain is void */
     return (double)(++S.in_token);
 }
 
@@ -634,9 +652,9 @@ double clap_in_sample(double dep, double i, double ch) {
  * 9. process() -- the node-side operator
  * ---------------------------------------------------------------- */
 
-static void queue_param(double id, double val) {
-    if (!(id >= 0.0) || S.ev_n >= EV_MAX) return;
-    if (isnan(val)) return;
+static int queue_param(double id, double val) {
+    if (!(id >= 0.0) || S.ev_n >= EV_MAX) return 0;
+    if (isnan(val)) return 0;
     clap_event_param_value_t *e = &S.ev[S.ev_n];
     memset(e, 0, sizeof *e);
     e->header.size     = sizeof *e;
@@ -652,7 +670,52 @@ static void queue_param(double id, double val) {
     e->key             = -1;
     e->value           = val;
     S.ev_n++;
+    return 1;
 }
+
+/* Where a parameter sits in the cache read at open, or -1 for an id the
+ * plugin does not declare. Linear over at most CLAP_HOST_MAX_PARAMS, once
+ * per parameter per block: a hash would be more code than the loop costs. */
+static long param_pos(double id) {
+    for (long i = 0; i < S.n_params; i++)
+        if (S.p_id[i] == id) return i;
+    return -1;
+}
+
+double clap_set_param(double dep, double id, double value) {
+    if (!S.open) { set_err("no plugin is open"); return NAN; }
+    if ((long)(dep + 0.5) != S.in_token || S.in_token == 0) return NAN;
+    long k = param_pos(id);
+    if (k < 0) {
+        set_err("plugin '%s' declares no parameter with id %g", S.plugin_name, id);
+        return NAN;
+    }
+    if (isnan(value)) return NAN;
+    /* Only what changed, the same rule clap_process()'s slots follow: a
+     * held parameter is one event on the first block and none after. */
+    if (isnan(S.sent_val[k]) || S.sent_val[k] != value) {
+        if (!queue_param(id, value)) {
+            set_err("parameter event queue full (%d) driving id %g", EV_MAX, id);
+            return NAN;
+        }
+        S.sent_val[k] = value;
+    }
+    return dep;
+}
+
+double clap_expect(double dep, double index) {
+    if (isnan(dep)) return NAN;
+    if (!S.open) { set_err("no plugin is open"); return NAN; }
+    long want = (long)(index + 0.5);
+    if (want != S.open_index) {
+        set_err("expected plugin %ld of the bundle, but '%s' (%ld) is open",
+                want, S.plugin_name, S.open_index);
+        return NAN;
+    }
+    return dep;
+}
+
+long clap_host_open_index(void) { return S.open ? S.open_index : -1; }
 
 double clap_process(double dep,
                     double id0, double v0, double id1, double v1,
@@ -664,7 +727,6 @@ double clap_process(double dep,
      * block and none after. */
     const double ids[CLAP_HOST_PARAM_SLOTS]  = { id0, id1, id2, id3 };
     const double vals[CLAP_HOST_PARAM_SLOTS] = { v0,  v1,  v2,  v3  };
-    S.ev_n = 0;
     for (int i = 0; i < CLAP_HOST_PARAM_SLOTS; i++) {
         if (!(ids[i] >= 0.0)) { S.slot_id[i] = -1.0; S.slot_val[i] = NAN; continue; }
         int changed = (S.slot_id[i] != ids[i]) || isnan(S.slot_val[i]) ||
@@ -699,6 +761,7 @@ double clap_process(double dep,
     clap_process_status st = S.plugin->process(S.plugin, &pr);
     S.n_process++;
     S.steady += S.block;
+    S.ev_n = 0;                     /* consumed; the next block starts empty */
 
     if (st == CLAP_PROCESS_ERROR) {
         set_err("plugin '%s' returned CLAP_PROCESS_ERROR", S.plugin_name);

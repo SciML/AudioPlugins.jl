@@ -6,12 +6,14 @@
  *
  *   cc -O2 -fPIC -shared -o ap_test.clap test/plugins/ap_test_plugins.c
  *   cc -O2 -fPIC -shared -o ap_many.clap test/plugins/ap_test_many.c
+ *   cc -O2 -fPIC -shared -o ap_manyparams.clap test/plugins/ap_test_manyparams.c
  *   cc -O2 -o probe test/probe.c csrc/clap_host.c -ldl -lm
- *   ./probe ./ap_test.clap /lib/x86_64-linux-gnu/libm.so.6 ./ap_many.clap
+ *   ./probe ./ap_test.clap /lib/x86_64-linux-gnu/libm.so.6 ./ap_many.clap ./ap_manyparams.clap
  *
  * argv[1] is the bundle (or the path `clap_test_bundle()` returns from
- * Julia); argv[2] and argv[3] are optional -- a shared object that is not a
- * plugin, and the many-plugin bundle of test/plugins/ap_test_many.c. */
+ * Julia); argv[2] to argv[4] are optional -- a shared object that is not a
+ * plugin, the many-plugin bundle of test/plugins/ap_test_many.c, and the
+ * eight-parameter bundle of test/plugins/ap_test_manyparams.c. */
 
 #include "../csrc/clap_host.h"
 #include <math.h>
@@ -198,6 +200,77 @@ int main(int argc, char **argv) {
          * one's count: the cache is grown, not refilled in place. */
         ck(clap_host_scan(BUNDLE) == 3, "  rescanning the small bundle finds 3 again");
         ck(strcmp(clap_host_scan_id(3), "") == 0, "  with nothing left over from the big one");
+    }
+
+    /* --- more parameters than clap_process has slots ---------------- *
+     * The chain is what a generated per-plugin component uses, and the
+     * fixture's powers-of-two weights are what make a mis-addressed
+     * parameter distinguishable from a mis-valued one. */
+    if (argc > 4) {
+        const char *MP = argv[4];
+        ck(clap_host_open(MP, "ap.weights", 48000, 8, 1) == 0, "open the 8-parameter plugin");
+        ck(clap_host_n_params() == 8, "  it reports eight parameters");
+        ck(clap_host_open_index() == 0, "  and knows which descriptor it is");
+
+        double buf[8];
+        for (int i = 0; i < 8; i++) buf[i] = 1.0;
+
+        double want = 0.0, tok = clap_in_fill(buf, 8, 1);
+        for (int k = 0; k < 8; k++) {
+            want += (double)(1u << k) * ((double)k / 16.0);
+            tok = clap_set_param(tok, k, (double)k / 16.0);
+        }
+        double out = clap_process(tok, -1, 0, -1, 0, -1, 0, -1, 0);
+        ck(fabs(clap_out_sample(out, 3, 0) - want) < 1e-5,
+           "  a chain of eight drives all eight");
+
+        /* Held: the second block queues nothing and must produce the same. */
+        tok = clap_in_fill(buf, 8, 1);
+        for (int k = 0; k < 8; k++) tok = clap_set_param(tok, k, (double)k / 16.0);
+        out = clap_process(tok, -1, 0, -1, 0, -1, 0, -1, 0);
+        ck(fabs(clap_out_sample(out, 3, 0) - want) < 1e-5,
+           "  holding them queues no event and changes nothing");
+
+        /* The chain and the four slots compose. Reopened first, because the
+         * blocks above left seven parameters set and this check is about
+         * which mechanism drove which id, not about what preceded it. */
+        clap_host_open(MP, "ap.weights", 48000, 8, 1);
+        tok = clap_set_param(clap_in_fill(buf, 8, 1), 7, 0.5);
+        out = clap_process(tok, 0, 1.0, 1, 1.0, -1, 0, -1, 0);
+        ck(fabs(clap_out_sample(out, 0, 0) - (1.0 + 2.0 + 128.0 * 0.5)) < 1e-5,
+           "  the chain and the slots compose");
+
+        /* Refusals, and that a refusal poisons the rest of the chain. */
+        tok = clap_in_fill(buf, 8, 1);
+        ck(isnan(clap_set_param(tok, 8, 0.5)), "  an unknown parameter id is refused");
+        ck(isnan(clap_set_param(tok, -1, 0.5)), "  a negative id is refused");
+        ck(isnan(clap_set_param(tok, 0, NAN)), "  a NaN value is refused");
+        ck(isnan(clap_set_param(tok + 1, 0, 0.5)), "  a stale block is refused");
+        ck(isnan(clap_set_param(NAN, 0, 0.5)), "  and NaN in is NaN out");
+        ck(isnan(clap_process(clap_set_param(NAN, 0, 0.5), -1, 0, -1, 0, -1, 0, -1, 0)),
+           "  a refused link poisons the process it feeds");
+
+        /* A chain that is never processed does not leak into the next block:
+         * from a fresh instance, whose parameters are all zero, so a leak
+         * would show up as a non-zero output. */
+        clap_host_open(MP, "ap.weights", 48000, 8, 1);
+        tok = clap_in_fill(buf, 8, 1);
+        clap_set_param(tok, 0, 1.0);
+        out = clap_process(clap_in_fill(buf, 8, 1), -1, 0, -1, 0, -1, 0, -1, 0);
+        ck(clap_out_sample(out, 0, 0) == 0.0, "  an abandoned chain is dropped at the block");
+        clap_host_close();
+
+        /* --- clap_expect: the wrong plugin is refused, not processed --- */
+        ck(clap_host_open(BUNDLE, "ap.onepole", 48000, 8, 1) == 0, "open ap.onepole to guard it");
+        ck(clap_host_open_index() == 1, "  it is descriptor 1");
+        tok = clap_in_fill(buf, 8, 1);
+        ck(clap_expect(tok, 1) == tok, "  clap_expect passes the token through");
+        ck(isnan(clap_expect(tok, 0)), "  and refuses a different descriptor");
+        ck(isnan(clap_expect(NAN, 1)), "  NaN in, NaN out");
+        ck(isnan(clap_process(clap_expect(tok, 0), 0, 0.25, -1, 0, -1, 0, -1, 0)),
+           "  the refusal reaches the output");
+        clap_host_close();
+        ck(clap_host_open_index() == -1, "  and nothing is open afterwards");
     }
 
     printf("\n%s (%d failure%s)\n", fails ? "FAILURES" : "ALL PROBES PASS",

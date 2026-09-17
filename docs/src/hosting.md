@@ -108,6 +108,48 @@ is exactly representable as a `Float64`: a model can name its own parameters, an
 is nothing to keep in sync driver-side. The price is that you look the numbers up once,
 with [`clap_params`](@ref), and pass them around yourself.
 
+### More parameters than there are slots
+
+Four slots is a floor. Plenty of plugins have more than four parameters — in the
+Airwindows collection 136 of the 504 do, and the widest has thirteen — so
+`AudioPlugins.clp_set` drives them by chaining instead:
+
+```julia
+tok = clap_fill!(x)
+for (i, v) in enumerate(values)          # one call per parameter
+    tok = AP.clp_set(tok, i - 1, v)
+end
+out = AP.clp_process(tok, -1, 0, -1, 0, -1, 0, -1, 0)
+```
+
+Each call returns the token it was given, so the calls form a *chain*, and that is the
+whole design: a synchronous program orders by data dependency and by nothing else, so
+unchained calls could be scheduled after the `clp_process` they were meant to precede. In
+a generated model the chain is one equation per parameter through intermediate variables.
+
+The two mechanisms compose — slots and chain can both drive a block — and each keeps its
+own change-detection state, so the one combination worth avoiding is driving the *same*
+id through both in one block, which sends two events for it.
+
+A refused link (`NaN`) poisons the rest of the chain rather than being skipped, and
+filling a new input block abandons whatever chain was pending, so a refusal cannot leak
+into the next block's parameters.
+
+### Refusing the wrong plugin
+
+The host holds one plugin at a time and the driver is what opens it, so a model built
+against one plugin will happily process through another and return numbers that look
+fine. `AudioPlugins.clp_expect` is the guard: it returns its token when the open plugin
+is the one at the given index of its bundle — the `index` field of [`plugins`](@ref) —
+and `NaN` otherwise.
+
+```julia
+tok = AP.clp_expect(clap_fill!(x), 137)   # 137 = plugins(Coll_jll)[k].index
+```
+
+[`clap_plugin_index`](@ref) is the driver-side counterpart, for asserting the same thing
+from outside the model.
+
 ## Reading the output
 
 [`clap_out`](@ref) is the vector-at-a-time reader. The scalar readers exist for the same
