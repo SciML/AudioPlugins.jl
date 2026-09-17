@@ -42,10 +42,10 @@ version = "1.11.0"
 
 [[deps.CLAPHost_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "472995739c6590cfb67cbd5c2bb0af38ca12af89"
+git-tree-sha1 = "ee046e09063de254f0aaef1d723526140580c79e"
 registries = "General"
 uuid = "c9c4f589-041a-5a1c-a149-a4cdc6e5211b"
-version = "1.0.1+0"
+version = "1.1.0+0"
 
 [[deps.CodecZlib]]
 deps = ["TranscodingStreams", "Zlib_jll"]
