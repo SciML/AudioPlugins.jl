@@ -26,7 +26,7 @@ version = "1.11.0"
 
 [[deps.AudioPlugins]]
 deps = ["CLAPHost_jll", "LV2Host_jll", "Scratch", "TOML", "VST3Host_jll", "lv2_jll"]
-path = "/home/runner/work/AudioPlugins.jl/AudioPlugins.jl"
+path = "/home/runner/_work/AudioPlugins.jl/AudioPlugins.jl"
 uuid = "83119930-5344-4127-8689-15f5870d6d1a"
 version = "1.4.0"
 
@@ -135,10 +135,10 @@ version = "1.8.0"
 
 [[deps.JSON]]
 deps = ["Dates", "Logging", "Parsers", "PrecompileTools", "StructUtils", "UUIDs", "Unicode"]
-git-tree-sha1 = "cb5b63c11dd08229716a8b41a2325ab941a7b797"
+git-tree-sha1 = "633b5a34494e711f694ccbc88a6e00102f10238c"
 registries = "General"
 uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
-version = "1.8.1"
+version = "1.9.0"
 
     [deps.JSON.extensions]
     JSONArrowExt = ["ArrowTypes"]
@@ -153,10 +153,10 @@ version = "1.12.0"
 
 [[deps.LV2Host_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Lilv_jll"]
-git-tree-sha1 = "7122685c53c52463fe7662e71faec1b1d035138c"
+git-tree-sha1 = "836334d19442c0b3f55555cba32a0c40025b8e7a"
 registries = "General"
 uuid = "a1fb6e78-af1d-557a-bd91-b38940fc92f3"
-version = "1.1.0+0"
+version = "1.1.1+0"
 
 [[deps.LazilyInitializedFields]]
 git-tree-sha1 = "0f2da712350b020bc3957f269c9caad516383ee0"
@@ -342,10 +342,10 @@ version = "0.6.22+0"
 
 [[deps.StructUtils]]
 deps = ["Dates", "UUIDs"]
-git-tree-sha1 = "3bf3b18614b45effa8f8cc6e8f919d4efc1de7f1"
+git-tree-sha1 = "b814d5005d6a529d740ffe06f8a86396f6501138"
 registries = "General"
 uuid = "ec057cc2-7a8d-4b58-b3b3-92acb9f63b42"
-version = "2.9.1"
+version = "2.9.2"
 
     [deps.StructUtils.extensions]
     StructUtilsLazilyInitializedFieldsExt = ["LazilyInitializedFields"]
