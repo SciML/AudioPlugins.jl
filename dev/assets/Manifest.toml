@@ -25,8 +25,8 @@ uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 version = "1.11.0"
 
 [[deps.AudioPlugins]]
-deps = ["CLAPHost_jll", "LV2Host_jll", "Scratch", "TOML", "VST3Host_jll", "lv2_jll"]
-path = "/home/runner/work/AudioPlugins.jl/AudioPlugins.jl"
+deps = ["CLAPHost_jll", "LV2Host_jll", "Libdl", "Scratch", "TOML", "VST3Host_jll", "lv2_jll"]
+path = "/home/runner/_work/AudioPlugins.jl/AudioPlugins.jl"
 uuid = "83119930-5344-4127-8689-15f5870d6d1a"
 version = "1.4.0"
 
