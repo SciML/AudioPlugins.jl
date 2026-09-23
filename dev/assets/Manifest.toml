@@ -25,7 +25,7 @@ uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
 version = "1.11.0"
 
 [[deps.AudioPlugins]]
-deps = ["CLAPHost_jll", "LV2Host_jll", "Libdl", "Scratch", "TOML", "VST3Host_jll", "lv2_jll"]
+deps = ["CLAPHost_jll", "LV2Host_jll", "Scratch", "TOML", "VST3Host_jll", "lv2_jll"]
 path = "/home/runner/_work/AudioPlugins.jl/AudioPlugins.jl"
 uuid = "83119930-5344-4127-8689-15f5870d6d1a"
 version = "1.4.0"
@@ -42,10 +42,10 @@ version = "1.11.0"
 
 [[deps.CLAPHost_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
-git-tree-sha1 = "ee046e09063de254f0aaef1d723526140580c79e"
+git-tree-sha1 = "a6a2acca5a6eed3e339a87b0ed452e2d0f036dc0"
 registries = "General"
 uuid = "c9c4f589-041a-5a1c-a149-a4cdc6e5211b"
-version = "1.1.0+0"
+version = "1.2.0+0"
 
 [[deps.CodecZlib]]
 deps = ["TranscodingStreams", "Zlib_jll"]
@@ -153,10 +153,10 @@ version = "1.12.0"
 
 [[deps.LV2Host_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Lilv_jll"]
-git-tree-sha1 = "836334d19442c0b3f55555cba32a0c40025b8e7a"
+git-tree-sha1 = "5a8babd02686f152a7d73f1bb22c203f8ebc1bf7"
 registries = "General"
 uuid = "a1fb6e78-af1d-557a-bd91-b38940fc92f3"
-version = "1.1.1+0"
+version = "1.2.0+0"
 
 [[deps.LazilyInitializedFields]]
 git-tree-sha1 = "0f2da712350b020bc3957f269c9caad516383ee0"
