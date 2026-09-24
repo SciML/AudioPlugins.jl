@@ -22,12 +22,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential liblilv-dev lv2-dev lv2-examples
       - name: CLAP
         run: |
-          cc -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -o ap_test.clap test/plugins/ap_test_plugins.c
+          cc -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -DAP_TEST_SINGLE_INIT -o ap_test.clap test/plugins/ap_test_plugins.c
           cc -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -o ap_many.clap test/plugins/ap_test_many.c
           cc -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -o ap_manyparams.clap test/plugins/ap_test_manyparams.c
           cc -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -o ap_sidechain.clap test/plugins/ap_test_sidechain.c
           cc -std=gnu99 -O2 -Wall -Wextra -o probe test/probe.c csrc/clap_host.c -ldl -lm
           ./probe "$PWD/ap_test.clap" /lib/x86_64-linux-gnu/libm.so.6 "$PWD/ap_many.clap" "$PWD/ap_manyparams.clap" "$PWD/ap_sidechain.clap"
+          cc -std=gnu99 -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer -o probe_clap_instances test/probe_clap_instances.c csrc/clap_host.c -ldl -lm
+          ./probe_clap_instances "$PWD/ap_test.clap"
       - name: LV2
         run: |
           mkdir -p lv2/ap_test.lv2
@@ -154,7 +156,9 @@ jobs:
       - name: CLAP (${{ matrix.msystem }})
         run: |
           gcc --version | head -1
-          gcc -std=gnu99 -O2 -shared -Wall -Wextra -Werror -o ap_test.clap test/plugins/ap_test_plugins.c
+          gcc -std=gnu99 -O2 -shared -Wall -Wextra -Werror -DAP_TEST_SINGLE_INIT -o ap_test.clap test/plugins/ap_test_plugins.c
           gcc -std=gnu99 -O2 -shared -Wall -Wextra -Werror -o ap_many.clap test/plugins/ap_test_many.c
           gcc -std=gnu99 -O2 -Wall -Wextra -Werror -o probe.exe test/probe.c csrc/clap_host.c -lm
           ./probe.exe "$(cygpath -m "$PWD")/ap_test.clap" "$(cygpath -m "$SYSTEMROOT")/System32/kernel32.dll" "$(cygpath -m "$PWD")/ap_many.clap"
+          gcc -std=gnu99 -O2 -Wall -Wextra -Werror -o probe_clap_instances.exe test/probe_clap_instances.c csrc/clap_host.c -lm
+          ./probe_clap_instances.exe "$(cygpath -m "$PWD")/ap_test.clap"

@@ -19,6 +19,7 @@
 
 #include "../../csrc/vendor/clap/clap.h"
 
+#include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +27,10 @@
 
 #define LOOKAHEAD_SAMPLES 16
 #define MAX_CHAN 2
+
+/* Assert module lifetime as well as audio arithmetic. A host must share
+ * init/deinit across its instances and destroy them before unloading. */
+static unsigned entry_refs, live_instances;
 
 /* ---------------------------------------------------------------- *
  * Descriptors
@@ -186,7 +191,11 @@ static const clap_plugin_audio_ports_t PORTS_EXT = { .count = ports_count, .get 
 
 static bool plug_init(const clap_plugin_t *p) { (void)p; return true; }
 
-static void plug_destroy(const clap_plugin_t *p) { free(p->plugin_data); }
+static void plug_destroy(const clap_plugin_t *p) {
+    assert(entry_refs > 0 && live_instances > 0);
+    live_instances--;
+    free(p->plugin_data);
+}
 
 static bool plug_activate(const clap_plugin_t *p, double sr, uint32_t minf, uint32_t maxf) {
     (void)sr;
@@ -278,6 +287,8 @@ static const clap_plugin_t *make(kind_t kind, const clap_plugin_descriptor_t *de
     (void)host;
     inst_t *s = calloc(1, sizeof *s);
     if (!s) return NULL;
+    assert(entry_refs > 0);
+    live_instances++;
     s->kind = kind;
     s->param = param_default(kind);
     s->plugin.desc = desc;
@@ -328,8 +339,21 @@ static const clap_plugin_factory_t FACTORY = {
     .create_plugin = factory_create,
 };
 
-static bool entry_init(const char *path) { (void)path; return true; }
-static void entry_deinit(void) { }
+static bool entry_init(const char *path) {
+    (void)path;
+    /* Reentrant initialization is required by CLAP 1.2 (a plugin may wrap
+     * another host), but this fixture also supports checking that our own
+     * host does not unnecessarily reinitialize a shared module. */
+#ifdef AP_TEST_SINGLE_INIT
+    assert(entry_refs == 0);
+#endif
+    entry_refs++;
+    return true;
+}
+static void entry_deinit(void) {
+    assert(entry_refs > 0);
+    if (--entry_refs == 0) assert(live_instances == 0);
+}
 
 static const void *entry_get_factory(const char *id) {
     return (strcmp(id, CLAP_PLUGIN_FACTORY_ID) == 0) ? &FACTORY : NULL;

@@ -44,7 +44,7 @@ extern "C" {
 #endif
 
 /* Largest block this host will process, and the widest channel count. Both
- * are compile-time because they size the static buffers -- a plugin host
+ * are compile-time because they size the per-instance buffers -- a plugin host
  * that allocated per block would be violating the one rule every plugin
  * author is asked to keep. */
 #define CLAP_HOST_MAX_BLOCK   8192
@@ -303,6 +303,60 @@ double clap_out_valid(double dep);
  * that segfaults takes the Julia process with it: there is no sandbox
  * here, and out-of-process hosting is a different and much larger design.
  * ------------------------------------------------------------------ */
+
+/* Independent instances. The legacy API above keeps its default instance;
+ * scanning/opening/closing it does not touch these handles. All calls into
+ * this host must be serialized (concurrent lifetimes, not parallel threads).
+ * Open returns an exact positive integer double, or NaN on failure. Close is
+ * idempotent. Handles are never reused; no pointer crosses the scalar ABI.
+ * Every _for entry point addresses one handle. Invalid handles return NaN,
+ * -1 or "" as appropriate (is_open and out_valid return 0).
+ * Managed block tokens are opaque, negative and unique across instances;
+ * stale and foreign tokens are refused. Buffers and event queues belong to
+ * each instance. There is no allocation on the processing/copy path.
+ * Discovery remains on the default instance; each open caches its own
+ * descriptors. Module initialization is shared until the last user closes.
+ */
+double clap_host_open_instance(const char *path, const char *plugin_id,
+                               double sample_rate, double block_size, double channels);
+void clap_host_close_instance(double handle);
+
+/* Copy a current output block into another instance's input and return its
+ * input token. Requires matching sample rate, block size and host channels;
+ * refuses stale output or incompatible configurations with NaN. No latency
+ * compensation is performed. Filling abandons pending parameter events just
+ * like clap_in_fill. source == destination is allowed for block feedback. */
+double clap_in_copy_for(double destination, double source, double dep);
+
+const char * clap_host_plugin_name_for(double handle);
+long clap_host_open_index_for(double handle);
+long clap_host_n_params_for(double handle);
+double clap_host_param_id_for(double handle, long i);
+double clap_host_param_min_for(double handle, long i);
+double clap_host_param_max_for(double handle, long i);
+double clap_host_param_default_for(double handle, long i);
+const char * clap_host_param_name_for(double handle, long i);
+double clap_host_param_value_for(double handle, double param_id);
+double clap_host_latency_for(double handle);
+double clap_host_sample_rate_for(double handle);
+double clap_host_block_size_for(double handle);
+double clap_host_channels_for(double handle);
+double clap_host_is_open_for(double handle);
+double clap_host_n_audio_in_for(double handle);
+double clap_host_n_audio_out_for(double handle);
+long clap_host_n_process_for(double handle);
+void clap_host_reset_counters_for(double handle);
+double clap_in_fill_for(double handle, const double *samples, long n, long channels);
+double clap_in_tone_for(double handle, double t, double waveform, double freq, double amp);
+double clap_in_sample_for(double handle, double dep, double i, double ch);
+double clap_process_for(double handle, double dep, double id0, double v0, double id1, double v1, double id2, double v2, double id3, double v3);
+double clap_set_param_for(double handle, double dep, double id, double value);
+double clap_expect_for(double handle, double dep, double index);
+double clap_out_sample_for(double handle, double dep, double i, double ch);
+double clap_out_rms_for(double handle, double dep);
+double clap_out_peak_for(double handle, double dep);
+double clap_out_count_for(double handle, double dep);
+double clap_out_valid_for(double handle, double dep);
 
 #ifdef __cplusplus
 }

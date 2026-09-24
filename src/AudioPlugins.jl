@@ -31,6 +31,7 @@ directly.
 module AudioPlugins
 
 include("clap_io.jl")
+include("clap_instances.jl")
 include("lv2_io.jl")
 include("vst3_io.jl")
 include("bundles.jl")

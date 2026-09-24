@@ -232,8 +232,8 @@ Enumerate a `.clap` bundle without instantiating anything. Throws with the
 host's own message when the bundle cannot be loaded.
 
 !!! warning
-    Scanning **closes whatever plugin is open**: the host holds one module at
-    a time, and a scan has to load the one it is scanning.
+    Scanning **closes the default plugin**. Independent [`ClapInstance`](@ref)
+    effects remain open.
 
 [`register_bundle!`](@ref) is the same enumeration, remembered, so that a
 plugin can be opened by id without naming its bundle again.
@@ -265,7 +265,7 @@ library honest about which build it was generated from.
 taxonomy usually appears: the Airwindows adapter emits `airwindows:<category>`
 alongside the standard keywords. It truncates at twelve entries.
 
-Scans, so it closes whatever plugin is open — the same caveat as
+Scans, so it closes the default plugin — the same caveat as
 [`clap_scan`](@ref).
 """
 function clap_descriptors(path::AbstractString)
@@ -579,7 +579,7 @@ end
 # N output samples (the pre-roll; feeding silence first changes only which
 # samples are discarded, not the lag), buffers the rest, emits a block once one
 # is whole, and clap_flush! feeds the N samples of zeros that collect the tail.
-# Mirroring the host's single-plugin-at-a-time design, the state is one
+# Compensation belongs to the default instance only; its state is one
 # module-level value reset by open/close.
 # ---------------------------------------------------------------------------
 
@@ -793,7 +793,7 @@ Return `dep` when the open plugin is the one at `index` in its bundle — the
 `index` field of [`plugins`](@ref) — and `NaN` otherwise.
 
 The guard a generated per-plugin component puts in front of its parameter
-chain. The host holds one plugin at a time and the driver is what opens it, so
+chain. The default API holds one plugin at a time and the driver opens it, so
 without this a model built for one effect processes through whichever effect
 happens to be open and returns numbers that look fine. `NaN` in, `NaN` out, so
 it composes with the rest of the refusal path.

@@ -79,6 +79,57 @@ using Preferences, CLAPHost_jll
 set_preferences!(CLAPHost_jll, "libclap_host_path" => "/path/to/libclap_host.so")
 ```
 
+## Several CLAP effects at once
+
+`ClapInstance` opens an independent effect. Pass it first to the CLAP readers,
+fill/output functions and `AudioPlugins.clp_*` operators. `clap_copy!` transfers
+one effect's output directly into another's input; both must have matching
+sample rates, block sizes and host channel counts. For example, a gain followed
+by a stateful one-pole filter:
+
+<!-- illustrative -->
+```julia
+using AudioPlugins
+const AP = AudioPlugins
+bundle = clap_test_bundle()
+
+ClapInstance(bundle; plugin_id = "ap.gain", block_size = 64) do gain
+    ClapInstance(bundle; plugin_id = "ap.onepole", block_size = 64) do filter
+        for _ in 1:2
+            input = clap_fill!(gain, ones(64))
+            amplified = AP.clp_process(gain, input, 0, 0.5, -1, 0, -1, 0, -1, 0)
+            filtered = AP.clp_process(filter, clap_copy!(filter, gain, amplified),
+                                     0, 0.25, -1, 0, -1, 0, -1, 0)
+            y = clap_out(filter, filtered)
+            # First block starts at 0.125; the second continues the filter state.
+        end
+    end
+end
+```
+
+The do-block closes its instance even on an exception. Without it, close with
+`clap_close!(instance)` in `finally`. Each instance has its own buffers,
+parameters and processing state; scanning, reopening or closing the default
+plugin leaves independent instances alone. The existing no-handle API keeps
+its replacement-on-open behavior. All host calls must be serialized: several
+effects can remain live, but simultaneous calls from multiple threads are not
+supported. Instance latency is reported by `clap_latency(instance)` and is not
+compensated.
+
+For generated nodes, pass `instance.handle` (an exact integer `Float64`) as
+the extra first argument to the `clp_*` operators; `AP.clp_copy(destination,
+source, token)` is the scalar counterpart of `clap_copy!`. The C API adds
+`clap_host_open_instance`, `clap_host_close_instance` and `_for` entry points
+without changing the existing symbols. Handles are never reused, and stale
+or foreign block tokens are refused. Tokens are opaque: do not do arithmetic
+on them. Opening still happens driver-side, where bundle paths are strings.
+
+The instance ABI needs a `CLAPHost_jll` build from these C sources; the currently
+required 1.2 build does not provide it. Until that JLL is released and the
+compat floor updated, use the local-build preference described above. The
+`CLAPInstances` test group compiles the shipped sources directly so CI can
+exercise the new ABI before its JLL release.
+
 ## Plugin collections
 
 Opening a plugin by path works; a collection shipped as a JLL has a path only the JLL

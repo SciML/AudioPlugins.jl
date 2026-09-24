@@ -30,6 +30,7 @@ clap_test_bundle
 clap_scan
 clap_descriptors
 clap_open!
+ClapInstance
 clap_close!
 clap_is_open
 clap_plugin_name
@@ -75,6 +76,7 @@ AudioPlugins.clap_param_value
 
 ```@docs
 clap_fill!
+clap_copy!
 clap_out
 clap_n_audio_in
 clap_n_audio_out
@@ -88,6 +90,7 @@ scheduled before the block it reads. Not exported: a Julia caller reaches them a
 
 ```@docs
 AudioPlugins.clp_in_tone
+AudioPlugins.clp_copy
 AudioPlugins.clp_process
 AudioPlugins.clp_set
 AudioPlugins.clp_expect

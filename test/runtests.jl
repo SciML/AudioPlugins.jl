@@ -7,6 +7,7 @@ using SciMLTesting
 run_tests(;
     core = joinpath(@__DIR__, "clap_host_tests.jl"),
     groups = Dict(
+        "CLAPInstances" => joinpath(@__DIR__, "clap_instances_tests.jl"),
         "Bundles" => joinpath(@__DIR__, "bundle_tests.jl"),
         "Export" => joinpath(@__DIR__, "export_tests.jl"),
         "ExportVST3" => joinpath(@__DIR__, "export_vst3_tests.jl"),

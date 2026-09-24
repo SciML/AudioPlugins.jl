@@ -70,7 +70,8 @@ gives the constraint away.
 
 Two consequences worth knowing before reading further:
 
-  - **The host holds one plugin at a time.** There is no handle to pass around;
+  - **The default API holds one plugin at a time.** Use `ClapInstance` handles
+    for several live effects;
     [`clap_open!`](@ref) opens *the* plugin and [`clap_is_open`](@ref) is the whole of
     its lifecycle state. Strings — a bundle path, a plugin id — appear only in the
     lifecycle and discovery functions, never on the processing path.

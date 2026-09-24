@@ -61,3 +61,8 @@ versions = ["1"]
 # is workflow-wide: setting it pins *every* leg to ubuntu-24.04, which would
 # drop the macOS and Windows lanes above. The lane therefore calls the reusable
 # tests.yml directly from .github/workflows/Tests32.yml instead.
+
+# Independent CLAP instances, built from the shipped host sources.
+[CLAPInstances]
+versions = ["lts", "1"]
+os = ["ubuntu-latest", "macos-latest", "windows-latest"]

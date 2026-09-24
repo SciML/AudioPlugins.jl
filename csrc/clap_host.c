@@ -1,9 +1,9 @@
 /* clap_host.c -- see clap_host.h for what this is and why it is shaped
- * this way. Headless CLAP host: dlopen a bundle, activate one plugin at a
- * fixed block size, and run it once per tick from a clocked equation.
+ * this way. Headless CLAP host: dlopen bundles, activate plugins at a
+ * fixed block size, and run each once per tick from a clocked equation.
  *
  * Everything here is deliberately allocation-free after open: the buffers
- * and the event list are static, sized by the compile-time maxima in the
+ * and event lists are per-instance, sized by the compile-time maxima in the
  * header. A host that allocated per block would be breaking the one
  * discipline every plugin author is asked to keep, while asking plugins to
  * keep it.
@@ -49,7 +49,7 @@ const char *clap_host_last_error(void) { return ERR; }
  * 2. State
  * ---------------------------------------------------------------- */
 
-/* One event per declared parameter, plus the four legacy clap_process()
+/* One event per declared parameter, plus the four legacy clap_process_ctx(s)
  * slots, so a block that drives every parameter of the widest plugin this
  * host will cache still cannot overflow the queue. */
 #define EV_MAX (CLAP_HOST_MAX_PARAMS + CLAP_HOST_PARAM_SLOTS)
@@ -66,7 +66,11 @@ typedef struct {
     char features[CLAP_HOST_MAX_FEATURES][CLAP_HOST_FEATURE_STR];
 } desc_t;
 
-typedef struct {
+typedef struct state {
+    double handle;
+    struct state *next;
+    clap_host_t host;
+    long restart_reqs, process_reqs, callback_reqs, out_ev_dropped;
     void                          *dl;
     const clap_plugin_entry_t     *entry;
     const clap_plugin_factory_t   *factory;
@@ -109,7 +113,7 @@ typedef struct {
     double sent_val[CLAP_HOST_MAX_PARAMS];
 
     /* Descriptor index of the open plugin within the last scan, -1 when
-     * nothing is open. What clap_expect() compares against. */
+     * nothing is open. What clap_expect_ctx(s) compares against. */
     long   open_index;
 
     float  in[CLAP_HOST_MAX_CHAN][CLAP_HOST_MAX_BLOCK];
@@ -129,8 +133,8 @@ typedef struct {
     float *in_ptr[CLAP_HOST_MAX_PORT_CHAN];
     float *out_ptr[CLAP_HOST_MAX_PORT_CHAN];
 
-    long   in_token;      /* monotonic; 0 means "no input block yet"  */
-    long   out_token;
+    double in_token;      /* opaque; 0 means "no input block yet"     */
+    double out_token;
     long   in_n;          /* frames actually in the input block       */
     long   out_n;
     long   n_process;
@@ -140,7 +144,37 @@ typedef struct {
     uint32_t                 ev_n;
 } state_t;
 
-static state_t S;
+static state_t DEFAULT_STATE;
+static state_t *INSTANCES;
+static double NEXT_HANDLE, NEXT_TOKEN;
+
+/* Handles are never reused. All host calls must be serialized by the caller. */
+static state_t *instance(double handle) {
+    for (state_t *s = INSTANCES; s; s = s->next)
+        if (s->handle == handle) return s;
+    set_err("invalid or closed CLAP instance %g", handle);
+    return NULL;
+}
+
+/* Keep legacy tokens unchanged, including their reset-on-open behavior.
+ * Managed tokens are negative, unique across instances and opens, and exact
+ * in the scalar-double ABI. Never wrap into an old token. */
+static double next_token(state_t *s, double previous) {
+    if (s == &DEFAULT_STATE) return previous + 1;
+    if (NEXT_TOKEN >= 9007199254740991.0) {
+        set_err("CLAP block token space exhausted");
+        return NAN;
+    }
+    return -(++NEXT_TOKEN);
+}
+
+/* Preserve the default API's rounded token comparisons. Independent
+ * instances require the exact opaque token, including its namespace. */
+static int token_matches(state_t *s, double dep, double token) {
+    return (s == &DEFAULT_STATE ? trunc(dep + 0.5) : dep) == token;
+}
+
+static void clap_host_close_ctx(state_t *s);
 
 /* ---------------------------------------------------------------- *
  * 3. The host we present to the plugin
@@ -160,11 +194,10 @@ static const void *host_get_extension(const clap_host_t *h, const char *id) {
  * a main-thread callback. A synchronous model has no scheduler to ask, so
  * these are recorded and otherwise ignored -- the plugin is driven by the
  * clock, which is the whole point. */
-static long HOST_RESTART_REQS, HOST_PROCESS_REQS, HOST_CALLBACK_REQS;
 
-static void host_request_restart(const clap_host_t *h)  { (void)h; HOST_RESTART_REQS++; }
-static void host_request_process(const clap_host_t *h)  { (void)h; HOST_PROCESS_REQS++; }
-static void host_request_callback(const clap_host_t *h) { (void)h; HOST_CALLBACK_REQS++; }
+static void host_request_restart(const clap_host_t *h)  { ((state_t *)h->host_data)->restart_reqs++; }
+static void host_request_process(const clap_host_t *h)  { ((state_t *)h->host_data)->process_reqs++; }
+static void host_request_callback(const clap_host_t *h) { ((state_t *)h->host_data)->callback_reqs++; }
 
 static const clap_host_t HOST = {
     .clap_version = CLAP_VERSION_INIT,
@@ -189,25 +222,20 @@ static const clap_host_t HOST = {
  * ---------------------------------------------------------------- */
 
 static uint32_t in_ev_size(const struct clap_input_events *l) {
-    (void)l;
-    return S.ev_n;
+    state_t *s = (state_t *)l->ctx;
+    return s->ev_n;
 }
 
 static const clap_event_header_t *in_ev_get(const struct clap_input_events *l, uint32_t i) {
-    (void)l;
-    return (i < S.ev_n) ? &S.ev[i].header : NULL;
+    state_t *s = (state_t *)l->ctx;
+    return (i < s->ev_n) ? &s->ev[i].header : NULL;
 }
-
-static long OUT_EV_DROPPED;
 
 static bool out_ev_push(const struct clap_output_events *l, const clap_event_header_t *e) {
-    (void)l; (void)e;
-    OUT_EV_DROPPED++;
+    (void)e;
+    ((state_t *)l->ctx)->out_ev_dropped++;
     return true;
 }
-
-static const clap_input_events_t  IN_EV  = { .ctx = NULL, .size = in_ev_size, .get = in_ev_get };
-static const clap_output_events_t OUT_EV = { .ctx = NULL, .try_push = out_ev_push };
 
 /* ---------------------------------------------------------------- *
  * 5. Discovery
@@ -284,13 +312,47 @@ static void *open_bundle(const char *path) {
     return NULL;
 }
 
-static void unload(void) {
-    if (S.entry_inited && S.entry && S.entry->deinit) S.entry->deinit();
-    S.entry_inited = 0;
-    if (S.dl) host_dlclose(S.dl);
-    S.dl = NULL;
-    S.entry = NULL;
-    S.factory = NULL;
+typedef struct module_ref {
+    const clap_plugin_entry_t *entry;
+    unsigned refs;
+    struct module_ref *next;
+} module_ref_t;
+static module_ref_t *MODULES;
+
+static int acquire_entry(const clap_plugin_entry_t *entry, const char *path) {
+    for (module_ref_t *m = MODULES; m; m = m->next) {
+        if (m->entry == entry) { m->refs++; return 1; }
+    }
+    module_ref_t *m = (module_ref_t *)calloc(1, sizeof *m);
+    if (!m) { set_err("out of memory loading CLAP module"); return 0; }
+    if (entry->init && !entry->init(path)) {
+        free(m);
+        set_err("clap_entry->init failed for %s", path);
+        return 0;
+    }
+    m->entry = entry;
+    m->refs = 1;
+    m->next = MODULES;
+    MODULES = m;
+    return 1;
+}
+
+static void unload(state_t *s) {
+    if (s->entry_inited) {
+        module_ref_t **link = &MODULES;
+        while (*link && (*link)->entry != s->entry) link = &(*link)->next;
+        if (*link && --(*link)->refs == 0) {
+            module_ref_t *m = *link;
+            if (s->entry->deinit) s->entry->deinit();
+            *link = m->next;
+            free(m);
+        }
+    }
+    s->entry_inited = 0;
+    if (s->dl) host_dlclose(s->dl);
+    s->dl = NULL;
+    s->entry = NULL;
+    s->factory = NULL;
 }
 
 /* Not a cap on what a bundle may hold -- the cache grows to fit -- but a
@@ -301,12 +363,12 @@ static void unload(void) {
 
 /* Grow the cache to at least `n` entries. Never shrinks, so scanning a big
  * bundle and then a small one does not churn the allocation. */
-static int grow_desc(long n) {
-    if (n <= S.cap_desc) return 1;
-    desc_t *p = (desc_t *)realloc(S.desc, (size_t)n * sizeof(desc_t));
+static int grow_desc(state_t *s, long n) {
+    if (n <= s->cap_desc) return 1;
+    desc_t *p = (desc_t *)realloc(s->desc, (size_t)n * sizeof(desc_t));
     if (!p) return 0;
-    S.desc = p;
-    S.cap_desc = n;
+    s->desc = p;
+    s->cap_desc = n;
     return 1;
 }
 
@@ -330,23 +392,23 @@ static void copy_desc(desc_t *out, const clap_plugin_descriptor_t *d) {
     }
 }
 
-long clap_host_scan(const char *path) {
+static long clap_host_scan_ctx(state_t *s, const char *path) {
     ERR[0] = '\0';
-    clap_host_close();
+    clap_host_close_ctx(s);
     /* Cleared here rather than just before the loop, so a scan that fails
      * leaves a count of 0 instead of the previous bundle's. clap_host_close
      * still preserves the cache, which is what a *failed open* wants. */
-    S.n_desc = 0;
+    s->n_desc = 0;
 
     if (!path || !path[0]) { set_err("no plugin path given"); return -1; }
 
-    S.dl = open_bundle(path);
-    if (!S.dl) { set_err("dlopen %s: %s", path, host_dlerror()); return -1; }
+    s->dl = open_bundle(path);
+    if (!s->dl) { set_err("dlopen %s: %s", path, host_dlerror()); return -1; }
 
-    const clap_plugin_entry_t *e = (const clap_plugin_entry_t *)host_dlsym(S.dl, "clap_entry");
+    const clap_plugin_entry_t *e = (const clap_plugin_entry_t *)host_dlsym(s->dl, "clap_entry");
     if (!e) {
         set_err("%s has no clap_entry symbol -- not a CLAP plugin", path);
-        unload();
+        unload(s);
         return -1;
     }
     if (!clap_version_is_compatible(e->clap_version)) {
@@ -355,92 +417,91 @@ long clap_host_scan(const char *path) {
                 e->clap_version.major, e->clap_version.minor, e->clap_version.revision,
                 (unsigned)CLAP_VERSION_MAJOR, (unsigned)CLAP_VERSION_MINOR,
                 (unsigned)CLAP_VERSION_REVISION);
-        unload();
+        unload(s);
         return -1;
     }
-    if (e->init && !e->init(path)) {
-        set_err("clap_entry->init failed for %s", path);
-        unload();
+    if (!acquire_entry(e, path)) {
+        unload(s);
         return -1;
     }
-    S.entry = e;
-    S.entry_inited = 1;
+    s->entry = e;
+    s->entry_inited = 1;
 
     const clap_plugin_factory_t *f =
         (const clap_plugin_factory_t *)e->get_factory(CLAP_PLUGIN_FACTORY_ID);
     if (!f) {
         set_err("%s offers no plugin factory", path);
-        unload();
+        unload(s);
         return -1;
     }
-    S.factory = f;
+    s->factory = f;
 
     uint32_t n = f->get_plugin_count(f);
     if (n > CLAP_HOST_SCAN_SANITY) {
         set_err("%s reports %u plugins, past the %d this host will believe",
                 path, n, CLAP_HOST_SCAN_SANITY);
-        unload();
+        unload(s);
         return -1;
     }
-    if (!grow_desc((long)n)) {
+    if (!grow_desc(s, (long)n)) {
         set_err("out of memory caching %u descriptors from %s", n, path);
-        unload();
+        unload(s);
         return -1;
     }
     for (uint32_t i = 0; i < n; i++) {
         const clap_plugin_descriptor_t *d = f->get_plugin_descriptor(f, i);
         if (!d) continue;
-        copy_desc(&S.desc[S.n_desc], d);
-        S.n_desc++;
+        copy_desc(&s->desc[s->n_desc], d);
+        s->n_desc++;
     }
-    if (S.n_desc == 0) {
+    if (s->n_desc == 0) {
         set_err("%s contains no usable plugin descriptors", path);
-        unload();
+        unload(s);
         return -1;
     }
-    return S.n_desc;
+    return s->n_desc;
 }
 
-long clap_host_scan_count(void) { return S.n_desc; }
+static long clap_host_scan_count_ctx(state_t *s) { return s->n_desc; }
 
 #define SCAN_FIELD(field)                                       \
-    return (i >= 0 && i < S.n_desc) ? S.desc[i].field : ""
+    return (i >= 0 && i < s->n_desc) ? s->desc[i].field : ""
 
-const char *clap_host_scan_id(long i)          { SCAN_FIELD(id); }
-const char *clap_host_scan_name(long i)        { SCAN_FIELD(name); }
-const char *clap_host_scan_vendor(long i)      { SCAN_FIELD(vendor); }
-const char *clap_host_scan_version(long i)     { SCAN_FIELD(version); }
-const char *clap_host_scan_description(long i) { SCAN_FIELD(description); }
+static const char *clap_host_scan_id_ctx(state_t *s, long i)          { SCAN_FIELD(id); }
+static const char *clap_host_scan_name_ctx(state_t *s, long i)        { SCAN_FIELD(name); }
+static const char *clap_host_scan_vendor_ctx(state_t *s, long i)      { SCAN_FIELD(vendor); }
+static const char *clap_host_scan_version_ctx(state_t *s, long i)     { SCAN_FIELD(version); }
+static const char *clap_host_scan_description_ctx(state_t *s, long i) { SCAN_FIELD(description); }
 
 #undef SCAN_FIELD
 
-long clap_host_scan_n_features(long i) {
-    return (i >= 0 && i < S.n_desc) ? S.desc[i].n_features : 0;
+static long clap_host_scan_n_features_ctx(state_t *s, long i) {
+    return (i >= 0 && i < s->n_desc) ? s->desc[i].n_features : 0;
 }
-const char *clap_host_scan_feature(long i, long k) {
-    if (i < 0 || i >= S.n_desc) return "";
-    if (k < 0 || k >= S.desc[i].n_features) return "";
-    return S.desc[i].features[k];
+static const char *clap_host_scan_feature_ctx(state_t *s, long i, long k) {
+    if (i < 0 || i >= s->n_desc) return "";
+    if (k < 0 || k >= s->desc[i].n_features) return "";
+    return s->desc[i].features[k];
 }
 
 /* ---------------------------------------------------------------- *
  * 6. Open / close
  * ---------------------------------------------------------------- */
 
-static void read_params(void) {
-    S.n_params = 0;
-    if (!S.params) return;
-    uint32_t n = S.params->count(S.plugin);
-    for (uint32_t i = 0; i < n && S.n_params < CLAP_HOST_MAX_PARAMS; i++) {
+static void read_params(state_t *s) {
+    s->n_params = 0;
+    if (!s->params) return;
+    uint32_t n = s->params->count(s->plugin);
+    for (uint32_t i = 0; i < n && s->n_params < CLAP_HOST_MAX_PARAMS; i++) {
         clap_param_info_t info;
         memset(&info, 0, sizeof info);
-        if (!S.params->get_info(S.plugin, i, &info)) continue;
-        long k = S.n_params++;
-        S.p_id[k]  = (double)info.id;
-        S.p_min[k] = info.min_value;
-        S.p_max[k] = info.max_value;
-        S.p_def[k] = info.default_value;
-        snprintf(S.p_name[k], sizeof S.p_name[0], "%s", info.name);
+        if (!s->params->get_info(s->plugin, i, &info)) continue;
+        long k = s->n_params++;
+        s->p_id[k]  = (double)info.id;
+        s->p_min[k] = info.min_value;
+        s->p_max[k] = info.max_value;
+        s->p_def[k] = info.default_value;
+        snprintf(s->p_name[k], sizeof s->p_name[0], "%s", info.name);
     }
 }
 
@@ -448,15 +509,15 @@ static void read_params(void) {
  * is still deactivated -- the only state in which the scan is legal. Only
  * the main port (index 0) is routed: non-main inputs read aux_in, non-main
  * outputs and main output channels past `chan` write sink. */
-static int read_audio_ports(const clap_plugin_t *p, const char *want, long ch) {
+static int read_audio_ports(state_t *s, const clap_plugin_t *p, const char *want, long ch) {
     const clap_plugin_audio_ports_t *ap =
         (const clap_plugin_audio_ports_t *)p->get_extension(p, CLAP_EXT_AUDIO_PORTS);
 
     /* audio-ports.h: a plugin without the extension has no audio ports. */
     if (!ap) {
-        S.n_in_ports = S.n_out_ports = 0;
-        S.n_in_chan = S.n_out_chan = 0;
-        S.n_in_main = S.n_out_main = S.n_in_aux = 0;
+        s->n_in_ports = s->n_out_ports = 0;
+        s->n_in_chan = s->n_out_chan = 0;
+        s->n_in_main = s->n_out_main = s->n_in_aux = 0;
         return 0;
     }
 
@@ -469,8 +530,8 @@ static int read_audio_ports(const clap_plugin_t *p, const char *want, long ch) {
                     want, n, dir_name, CLAP_HOST_MAX_PORTS);
             return 1;
         }
-        clap_audio_buffer_t *bufs = is_input ? S.in_bufs : S.out_bufs;
-        float **ptr = is_input ? S.in_ptr : S.out_ptr;
+        clap_audio_buffer_t *bufs = is_input ? s->in_bufs : s->out_bufs;
+        float **ptr = is_input ? s->in_ptr : s->out_ptr;
         long flat = 0;
         for (uint32_t i = 0; i < n; i++) {
             clap_audio_port_info_t info;
@@ -502,89 +563,91 @@ static int read_audio_ports(const clap_plugin_t *p, const char *want, long ch) {
             bufs[i].channel_count = info.channel_count;
             for (uint32_t c = 0; c < info.channel_count; c++, flat++)
                 ptr[flat] = i == 0
-                    ? (is_input ? S.in[flat < ch ? flat : ch - 1]
-                                : (flat < ch ? S.out[flat] : S.sink))
-                    : (is_input ? S.aux_in : S.sink);
+                    ? (is_input ? s->in[flat < ch ? flat : ch - 1]
+                                : (flat < ch ? s->out[flat] : s->sink))
+                    : (is_input ? s->aux_in : s->sink);
         }
         if (is_input) {
-            S.n_in_ports = (long)n;
-            S.n_in_chan = flat;
-            S.n_in_main = n ? (long)bufs[0].channel_count : 0;
-            S.n_in_aux = flat - S.n_in_main;
+            s->n_in_ports = (long)n;
+            s->n_in_chan = flat;
+            s->n_in_main = n ? (long)bufs[0].channel_count : 0;
+            s->n_in_aux = flat - s->n_in_main;
         } else {
-            S.n_out_ports = (long)n;
-            S.n_out_chan = flat;
-            S.n_out_main = n ? (long)bufs[0].channel_count : 0;
+            s->n_out_ports = (long)n;
+            s->n_out_chan = flat;
+            s->n_out_main = n ? (long)bufs[0].channel_count : 0;
         }
     }
 
     /* A main input narrower than the host block would need a channel
      * invented for it -- refuse rather than guess. */
-    if (S.n_in_ports && S.n_in_main < ch) {
+    if (s->n_in_ports && s->n_in_main < ch) {
         set_err("plugin '%s' declares %ld main input channel(s), fewer than "
-                "the %ld channel(s) asked for", want, S.n_in_main, ch);
+                "the %ld channel(s) asked for", want, s->n_in_main, ch);
         return 1;
     }
     return 0;
 }
 
-int clap_host_open(const char *path, const char *plugin_id,
+static int clap_host_open_ctx(state_t *s, const char *path, const char *plugin_id,
                    double sample_rate, double block_size, double channels) {
-    long n = clap_host_scan(path);      /* also clears state and sets ERR */
+    long n = clap_host_scan_ctx(s, path);      /* also clears state and sets ERR */
     if (n < 0) return 1;
 
     long blk = (long)(block_size + 0.5);
     long ch  = (long)(channels + 0.5);
     if (blk < 1 || blk > CLAP_HOST_MAX_BLOCK) {
         set_err("block_size %ld out of range 1..%d", blk, CLAP_HOST_MAX_BLOCK);
-        clap_host_close();
+        clap_host_close_ctx(s);
         return 1;
     }
     if (ch < 1 || ch > CLAP_HOST_MAX_CHAN) {
         set_err("channels %ld out of range 1..%d", ch, CLAP_HOST_MAX_CHAN);
-        clap_host_close();
+        clap_host_close_ctx(s);
         return 1;
     }
     if (!(sample_rate > 0.0)) {
         set_err("sample_rate must be positive, got %g", sample_rate);
-        clap_host_close();
+        clap_host_close_ctx(s);
         return 1;
     }
 
-    const char *want = (plugin_id && plugin_id[0]) ? plugin_id : S.desc[0].id;
+    const char *want = (plugin_id && plugin_id[0]) ? plugin_id : s->desc[0].id;
     long which = -1;
-    for (long i = 0; i < S.n_desc; i++)
-        if (strcmp(S.desc[i].id, want) == 0) { which = i; break; }
+    for (long i = 0; i < s->n_desc; i++)
+        if (strcmp(s->desc[i].id, want) == 0) { which = i; break; }
     if (which < 0) {
         set_err("no plugin with id '%s' in %s (it has %ld: first is '%s')",
-                want, path, S.n_desc, S.desc[0].id);
-        clap_host_close();
+                want, path, s->n_desc, s->desc[0].id);
+        clap_host_close_ctx(s);
         return 1;
     }
 
-    const clap_plugin_t *p = S.factory->create_plugin(S.factory, &HOST, want);
+    s->host = HOST;
+    s->host.host_data = s;
+    const clap_plugin_t *p = s->factory->create_plugin(s->factory, &s->host, want);
     if (!p) {
         set_err("create_plugin('%s') returned nothing", want);
-        clap_host_close();
+        clap_host_close_ctx(s);
         return 1;
     }
     if (!p->init(p)) {
         set_err("plugin '%s' failed to init", want);
         p->destroy(p);
-        clap_host_close();
+        clap_host_close_ctx(s);
         return 1;
     }
-    S.plugin = p;
-    snprintf(S.plugin_name, sizeof S.plugin_name, "%s",
+    s->plugin = p;
+    snprintf(s->plugin_name, sizeof s->plugin_name, "%s",
              (p->desc && p->desc->name) ? p->desc->name : want);
 
     /* The audio-port scan is only legal while the plugin is deactivated,
      * so it happens here: before activate, and before anything is asked
      * to run. A layout the host cannot serve fails the open. */
-    if (read_audio_ports(p, want, ch) != 0) {
+    if (read_audio_ports(s, p, want, ch) != 0) {
         p->destroy(p);
-        S.plugin = NULL;
-        clap_host_close();
+        s->plugin = NULL;
+        clap_host_close_ctx(s);
         return 1;
     }
 
@@ -594,134 +657,134 @@ int clap_host_open(const char *path, const char *plugin_id,
         set_err("plugin '%s' refused activate(%g Hz, %ld..%ld frames)",
                 want, sample_rate, blk, blk);
         p->destroy(p);
-        S.plugin = NULL;
-        clap_host_close();
+        s->plugin = NULL;
+        clap_host_close_ctx(s);
         return 1;
     }
     if (!p->start_processing(p)) {
         set_err("plugin '%s' refused start_processing", want);
         p->deactivate(p);
         p->destroy(p);
-        S.plugin = NULL;
-        clap_host_close();
+        s->plugin = NULL;
+        clap_host_close_ctx(s);
         return 1;
     }
 
-    S.params  = (const clap_plugin_params_t *)p->get_extension(p, CLAP_EXT_PARAMS);
-    S.latency = (const clap_plugin_latency_t *)p->get_extension(p, CLAP_EXT_LATENCY);
-    read_params();
+    s->params  = (const clap_plugin_params_t *)p->get_extension(p, CLAP_EXT_PARAMS);
+    s->latency = (const clap_plugin_latency_t *)p->get_extension(p, CLAP_EXT_LATENCY);
+    read_params(s);
 
-    S.sample_rate = sample_rate;
-    S.block = blk;
-    S.chan  = ch;
+    s->sample_rate = sample_rate;
+    s->block = blk;
+    s->chan  = ch;
     for (int i = 0; i < CLAP_HOST_PARAM_SLOTS; i++) {
-        S.slot_id[i]  = -1.0;
-        S.slot_val[i] = NAN;
+        s->slot_id[i]  = -1.0;
+        s->slot_val[i] = NAN;
     }
-    for (long i = 0; i < CLAP_HOST_MAX_PARAMS; i++) S.sent_val[i] = NAN;
-    S.open_index = which;
-    S.in_token = S.out_token = 0;
-    S.in_n = S.out_n = 0;
-    S.n_process = 0;
-    S.steady = 0;
-    S.open = 1;
+    for (long i = 0; i < CLAP_HOST_MAX_PARAMS; i++) s->sent_val[i] = NAN;
+    s->open_index = which;
+    s->in_token = s->out_token = 0;
+    s->in_n = s->out_n = 0;
+    s->n_process = 0;
+    s->steady = 0;
+    s->open = 1;
     return 0;
 }
 
-void clap_host_close(void) {
-    if (S.plugin) {
-        if (S.open) S.plugin->stop_processing(S.plugin);
-        S.plugin->deactivate(S.plugin);
-        S.plugin->destroy(S.plugin);
+static void clap_host_close_ctx(state_t *s) {
+    if (s->plugin) {
+        if (s->open) s->plugin->stop_processing(s->plugin);
+        s->plugin->deactivate(s->plugin);
+        s->plugin->destroy(s->plugin);
     }
     /* The descriptor cache survives deliberately: a scan that found
      * plugins is information a caller still wants after a failed open,
      * which is why the reset below is field-by-field rather than a
      * memset of the whole state. */
-    S.plugin = NULL;
-    S.params = NULL;
-    S.latency = NULL;
-    S.open = 0;
-    S.n_params = 0;
-    S.n_in_ports = S.n_out_ports = 0;
-    S.n_in_chan = S.n_out_chan = 0;
-    S.n_in_main = S.n_out_main = S.n_in_aux = 0;
-    S.open_index = -1;
-    S.in_token = S.out_token = 0;
-    S.in_n = S.out_n = 0;
-    S.n_process = 0;
-    S.steady = 0;
-    S.ev_n = 0;
-    S.plugin_name[0] = '\0';
-    unload();
+    s->plugin = NULL;
+    s->params = NULL;
+    s->latency = NULL;
+    s->open = 0;
+    s->n_params = 0;
+    s->n_in_ports = s->n_out_ports = 0;
+    s->n_in_chan = s->n_out_chan = 0;
+    s->n_in_main = s->n_out_main = s->n_in_aux = 0;
+    s->open_index = -1;
+    s->in_token = s->out_token = 0;
+    s->in_n = s->out_n = 0;
+    s->n_process = 0;
+    s->steady = 0;
+    s->ev_n = 0;
+    s->plugin_name[0] = '\0';
+    unload(s);
 }
 
-const char *clap_host_plugin_name(void) { return S.plugin_name; }
+static const char *clap_host_plugin_name_ctx(state_t *s) { return s->plugin_name; }
 
 /* ---------------------------------------------------------------- *
  * 7. Parameter and configuration reporting
  * ---------------------------------------------------------------- */
 
-long   clap_host_n_params(void) { return S.n_params; }
+static long clap_host_n_params_ctx(state_t *s) { return s->n_params; }
 
-static int pidx(long i) { return (i >= 0 && i < S.n_params); }
+static int pidx(state_t *s, long i) { return (i >= 0 && i < s->n_params); }
 
-double clap_host_param_id(long i)      { return pidx(i) ? S.p_id[i]  : -1.0; }
-double clap_host_param_min(long i)     { return pidx(i) ? S.p_min[i] : NAN; }
-double clap_host_param_max(long i)     { return pidx(i) ? S.p_max[i] : NAN; }
-double clap_host_param_default(long i) { return pidx(i) ? S.p_def[i] : NAN; }
-const char *clap_host_param_name(long i) { return pidx(i) ? S.p_name[i] : ""; }
+static double clap_host_param_id_ctx(state_t *s, long i)      { return pidx(s, i) ? s->p_id[i]  : -1.0; }
+static double clap_host_param_min_ctx(state_t *s, long i)     { return pidx(s, i) ? s->p_min[i] : NAN; }
+static double clap_host_param_max_ctx(state_t *s, long i)     { return pidx(s, i) ? s->p_max[i] : NAN; }
+static double clap_host_param_default_ctx(state_t *s, long i) { return pidx(s, i) ? s->p_def[i] : NAN; }
+static const char *clap_host_param_name_ctx(state_t *s, long i) { return pidx(s, i) ? s->p_name[i] : ""; }
 
-double clap_host_param_value(double param_id) {
-    if (!S.open || !S.params) return NAN;
+static double clap_host_param_value_ctx(state_t *s, double param_id) {
+    if (!s->open || !s->params) return NAN;
     double out = NAN;
-    if (!S.params->get_value(S.plugin, (clap_id)(uint32_t)param_id, &out)) return NAN;
+    if (!s->params->get_value(s->plugin, (clap_id)(uint32_t)param_id, &out)) return NAN;
     return out;
 }
 
-double clap_host_latency(void) {
-    if (!S.open || !S.latency) return 0.0;
-    return (double)S.latency->get(S.plugin);
+static double clap_host_latency_ctx(state_t *s) {
+    if (!s->open || !s->latency) return 0.0;
+    return (double)s->latency->get(s->plugin);
 }
 
-double clap_host_sample_rate(void) { return S.open ? S.sample_rate : 0.0; }
-double clap_host_block_size(void)  { return S.open ? (double)S.block : 0.0; }
-double clap_host_channels(void)    { return S.open ? (double)S.chan : 0.0; }
-double clap_host_is_open(void)     { return S.open ? 1.0 : 0.0; }
-double clap_host_n_audio_in(void)  { return S.open ? (double)S.n_in_chan  : 0.0; }
-double clap_host_n_audio_out(void) { return S.open ? (double)S.n_out_chan : 0.0; }
-long   clap_host_n_process(void)   { return S.n_process; }
+static double clap_host_sample_rate_ctx(state_t *s) { return s->open ? s->sample_rate : 0.0; }
+static double clap_host_block_size_ctx(state_t *s)  { return s->open ? (double)s->block : 0.0; }
+static double clap_host_channels_ctx(state_t *s)    { return s->open ? (double)s->chan : 0.0; }
+static double clap_host_is_open_ctx(state_t *s)     { return s->open ? 1.0 : 0.0; }
+static double clap_host_n_audio_in_ctx(state_t *s)  { return s->open ? (double)s->n_in_chan  : 0.0; }
+static double clap_host_n_audio_out_ctx(state_t *s) { return s->open ? (double)s->n_out_chan : 0.0; }
+static long clap_host_n_process_ctx(state_t *s)   { return s->n_process; }
 
-void clap_host_reset_counters(void) {
-    S.n_process = 0;
-    S.steady = 0;
-    HOST_RESTART_REQS = HOST_PROCESS_REQS = HOST_CALLBACK_REQS = 0;
-    OUT_EV_DROPPED = 0;
+static void clap_host_reset_counters_ctx(state_t *s) {
+    s->n_process = 0;
+    s->steady = 0;
+    s->restart_reqs = s->process_reqs = s->callback_reqs = 0;
+    s->out_ev_dropped = 0;
 }
 
 /* ---------------------------------------------------------------- *
  * 8. The input block
  * ---------------------------------------------------------------- */
 
-double clap_in_fill(const double *samples, long n, long channels) {
-    if (!S.open) { set_err("no plugin is open"); return NAN; }
+static double clap_in_fill_ctx(state_t *s, const double *samples, long n, long channels) {
+    if (!s->open) { set_err("no plugin is open"); return NAN; }
     if (!samples || n < 0) { set_err("clap_in_fill: no samples"); return NAN; }
-    if (n > S.block) n = S.block;
-    long ch = (channels < 1) ? 1 : (channels > S.chan ? S.chan : channels);
+    if (n > s->block) n = s->block;
+    long ch = (channels < 1) ? 1 : (channels > s->chan ? s->chan : channels);
     for (long i = 0; i < n; i++)
-        for (long c = 0; c < S.chan; c++) {
+        for (long c = 0; c < s->chan; c++) {
             long src = (c < ch) ? (i * ch + c) : (i * ch);   /* mono -> all */
-            S.in[c][i] = (float)samples[src];
+            s->in[c][i] = (float)samples[src];
         }
-    for (long i = n; i < S.block; i++)
-        for (long c = 0; c < S.chan; c++) S.in[c][i] = 0.0f;
-    S.in_n = n;
-    S.ev_n = 0;                     /* a new block, so any pending chain is void */
-    return (double)(++S.in_token);
+    for (long i = n; i < s->block; i++)
+        for (long c = 0; c < s->chan; c++) s->in[c][i] = 0.0f;
+    s->in_n = n;
+    s->ev_n = 0;                     /* a new block, so any pending chain is void */
+    return (s->in_token = next_token(s, s->in_token));
 }
 
-static double wave_at(long k, int w, double freq, double amp) {
-    double t = (double)k / S.sample_rate;
+static double wave_at(state_t *s, long k, int w, double freq, double amp) {
+    double t = (double)k / s->sample_rate;
     switch (w) {
     case CLAP_WAVE_SINE:    return amp * sin(2.0 * M_PI * freq * t);
     case CLAP_WAVE_SQUARE:  return amp * (sin(2.0 * M_PI * freq * t) >= 0.0 ? 1.0 : -1.0);
@@ -731,38 +794,38 @@ static double wave_at(long k, int w, double freq, double amp) {
     }
 }
 
-double clap_in_tone(double t, double waveform, double freq, double amp) {
-    if (!S.open) { set_err("no plugin is open"); return NAN; }
+static double clap_in_tone_ctx(state_t *s, double t, double waveform, double freq, double amp) {
+    if (!s->open) { set_err("no plugin is open"); return NAN; }
     /* The block ENDING at t, so the frame is a pure function of the
      * arguments and two reads in one tick cannot disagree. */
-    double end = t * S.sample_rate;
-    long first = (long)(end + 0.5) - S.block;
+    double end = t * s->sample_rate;
+    long first = (long)(end + 0.5) - s->block;
     int w = (int)(waveform + 0.5);
-    for (long i = 0; i < S.block; i++) {
-        double v = wave_at(first + i, w, freq, amp);
-        for (long c = 0; c < S.chan; c++) S.in[c][i] = (float)v;
+    for (long i = 0; i < s->block; i++) {
+        double v = wave_at(s, first + i, w, freq, amp);
+        for (long c = 0; c < s->chan; c++) s->in[c][i] = (float)v;
     }
-    S.in_n = S.block;
-    S.ev_n = 0;                     /* a new block, so any pending chain is void */
-    return (double)(++S.in_token);
+    s->in_n = s->block;
+    s->ev_n = 0;                     /* a new block, so any pending chain is void */
+    return (s->in_token = next_token(s, s->in_token));
 }
 
-double clap_in_sample(double dep, double i, double ch) {
-    if (!S.open) return NAN;
-    if ((long)(dep + 0.5) != S.in_token) return NAN;
+static double clap_in_sample_ctx(state_t *s, double dep, double i, double ch) {
+    if (!s->open) return NAN;
+    if (!token_matches(s, dep, s->in_token)) return NAN;
     long k = (long)(i + 0.5), c = (long)(ch + 0.5);
-    if (k < 0 || k >= S.in_n || c < 0 || c >= S.chan) return NAN;
-    return (double)S.in[c][k];
+    if (k < 0 || k >= s->in_n || c < 0 || c >= s->chan) return NAN;
+    return (double)s->in[c][k];
 }
 
 /* ---------------------------------------------------------------- *
  * 9. process() -- the node-side operator
  * ---------------------------------------------------------------- */
 
-static int queue_param(double id, double val) {
-    if (!(id >= 0.0) || S.ev_n >= EV_MAX) return 0;
+static int queue_param(state_t *s, double id, double val) {
+    if (!(id >= 0.0) || s->ev_n >= EV_MAX) return 0;
     if (isnan(val)) return 0;
-    clap_event_param_value_t *e = &S.ev[S.ev_n];
+    clap_event_param_value_t *e = &s->ev[s->ev_n];
     memset(e, 0, sizeof *e);
     e->header.size     = sizeof *e;
     e->header.time     = 0;                       /* at the block boundary */
@@ -776,147 +839,429 @@ static int queue_param(double id, double val) {
     e->channel         = -1;
     e->key             = -1;
     e->value           = val;
-    S.ev_n++;
+    s->ev_n++;
     return 1;
 }
 
 /* Where a parameter sits in the cache read at open, or -1 for an id the
  * plugin does not declare. Linear over at most CLAP_HOST_MAX_PARAMS, once
  * per parameter per block: a hash would be more code than the loop costs. */
-static long param_pos(double id) {
-    for (long i = 0; i < S.n_params; i++)
-        if (S.p_id[i] == id) return i;
+static long param_pos(state_t *s, double id) {
+    for (long i = 0; i < s->n_params; i++)
+        if (s->p_id[i] == id) return i;
     return -1;
 }
 
-double clap_set_param(double dep, double id, double value) {
-    if (!S.open) { set_err("no plugin is open"); return NAN; }
-    if ((long)(dep + 0.5) != S.in_token || S.in_token == 0) return NAN;
-    long k = param_pos(id);
+static double clap_set_param_ctx(state_t *s, double dep, double id, double value) {
+    if (!s->open) { set_err("no plugin is open"); return NAN; }
+    if (!token_matches(s, dep, s->in_token) || s->in_token == 0) return NAN;
+    long k = param_pos(s, id);
     if (k < 0) {
-        set_err("plugin '%s' declares no parameter with id %g", S.plugin_name, id);
+        set_err("plugin '%s' declares no parameter with id %g", s->plugin_name, id);
         return NAN;
     }
     if (isnan(value)) return NAN;
-    /* Only what changed, the same rule clap_process()'s slots follow: a
+    /* Only what changed, the same rule clap_process_ctx(s)'s slots follow: a
      * held parameter is one event on the first block and none after. */
-    if (isnan(S.sent_val[k]) || S.sent_val[k] != value) {
-        if (!queue_param(id, value)) {
+    if (isnan(s->sent_val[k]) || s->sent_val[k] != value) {
+        if (!queue_param(s, id, value)) {
             set_err("parameter event queue full (%d) driving id %g", EV_MAX, id);
             return NAN;
         }
-        S.sent_val[k] = value;
+        s->sent_val[k] = value;
     }
     return dep;
 }
 
-double clap_expect(double dep, double index) {
+static double clap_expect_ctx(state_t *s, double dep, double index) {
     if (isnan(dep)) return NAN;
-    if (!S.open) { set_err("no plugin is open"); return NAN; }
+    if (!s->open) { set_err("no plugin is open"); return NAN; }
     long want = (long)(index + 0.5);
-    if (want != S.open_index) {
+    if (want != s->open_index) {
         set_err("expected plugin %ld of the bundle, but '%s' (%ld) is open",
-                want, S.plugin_name, S.open_index);
+                want, s->plugin_name, s->open_index);
         return NAN;
     }
     return dep;
 }
 
-long clap_host_open_index(void) { return S.open ? S.open_index : -1; }
+static long clap_host_open_index_ctx(state_t *s) { return s->open ? s->open_index : -1; }
 
-double clap_process(double dep,
+static double clap_process_ctx(state_t *s, double dep,
                     double id0, double v0, double id1, double v1,
                     double id2, double v2, double id3, double v3) {
-    if (!S.open) { set_err("no plugin is open"); return NAN; }
-    if ((long)(dep + 0.5) != S.in_token || S.in_token == 0) return NAN;
+    if (!s->open) { set_err("no plugin is open"); return NAN; }
+    if (!token_matches(s, dep, s->in_token) || s->in_token == 0) return NAN;
 
     /* Only send what changed: a held parameter is one event on the first
      * block and none after. */
     const double ids[CLAP_HOST_PARAM_SLOTS]  = { id0, id1, id2, id3 };
     const double vals[CLAP_HOST_PARAM_SLOTS] = { v0,  v1,  v2,  v3  };
     for (int i = 0; i < CLAP_HOST_PARAM_SLOTS; i++) {
-        if (!(ids[i] >= 0.0)) { S.slot_id[i] = -1.0; S.slot_val[i] = NAN; continue; }
-        int changed = (S.slot_id[i] != ids[i]) || isnan(S.slot_val[i]) ||
-                      (S.slot_val[i] != vals[i]);
+        if (!(ids[i] >= 0.0)) { s->slot_id[i] = -1.0; s->slot_val[i] = NAN; continue; }
+        int changed = (s->slot_id[i] != ids[i]) || isnan(s->slot_val[i]) ||
+                      (s->slot_val[i] != vals[i]);
         if (changed) {
-            queue_param(ids[i], vals[i]);
-            S.slot_id[i]  = ids[i];
-            S.slot_val[i] = vals[i];
+            queue_param(s, ids[i], vals[i]);
+            s->slot_id[i]  = ids[i];
+            s->slot_val[i] = vals[i];
         }
     }
 
-    if (S.n_in_aux) memset(S.aux_in, 0, (size_t)S.block * sizeof(float));
+    if (s->n_in_aux) memset(s->aux_in, 0, (size_t)s->block * sizeof(float));
 
     clap_process_t pr;
     memset(&pr, 0, sizeof pr);
-    pr.steady_time        = S.steady;
-    pr.frames_count       = (uint32_t)S.block;
+    pr.steady_time        = s->steady;
+    pr.frames_count       = (uint32_t)s->block;
     pr.transport          = NULL;      /* free-running: no tempo, no bars */
-    pr.audio_inputs       = S.n_in_ports ? S.in_bufs : NULL;
-    pr.audio_outputs      = S.n_out_ports ? S.out_bufs : NULL;
-    pr.audio_inputs_count = (uint32_t)S.n_in_ports;
-    pr.audio_outputs_count = (uint32_t)S.n_out_ports;
-    pr.in_events          = &IN_EV;
-    pr.out_events         = &OUT_EV;
+    pr.audio_inputs       = s->n_in_ports ? s->in_bufs : NULL;
+    pr.audio_outputs      = s->n_out_ports ? s->out_bufs : NULL;
+    pr.audio_inputs_count = (uint32_t)s->n_in_ports;
+    pr.audio_outputs_count = (uint32_t)s->n_out_ports;
+    const clap_input_events_t in_ev = { .ctx = s, .size = in_ev_size, .get = in_ev_get };
+    const clap_output_events_t out_ev = { .ctx = s, .try_push = out_ev_push };
+    pr.in_events          = &in_ev;
+    pr.out_events         = &out_ev;
 
-    clap_process_status st = S.plugin->process(S.plugin, &pr);
-    S.n_process++;
-    S.steady += S.block;
-    S.ev_n = 0;                     /* consumed; the next block starts empty */
+    clap_process_status st = s->plugin->process(s->plugin, &pr);
+    s->n_process++;
+    s->steady += s->block;
+    s->ev_n = 0;                     /* consumed; the next block starts empty */
 
     if (st == CLAP_PROCESS_ERROR) {
-        set_err("plugin '%s' returned CLAP_PROCESS_ERROR", S.plugin_name);
-        S.out_n = 0;
+        set_err("plugin '%s' returned CLAP_PROCESS_ERROR", s->plugin_name);
+        s->out_n = 0;
         return NAN;
     }
 
     /* Host channels the main output did not fill: duplicate a mono main
      * output onto channel 1, zero anything else (a plugin with no outputs
      * is silence rather than whatever out[][] last held). */
-    for (long c = S.n_out_main; c < S.chan; c++) {
-        if (c == 1 && S.n_out_main == 1)
-            memcpy(S.out[1], S.out[0], (size_t)S.block * sizeof(float));
+    for (long c = s->n_out_main; c < s->chan; c++) {
+        if (c == 1 && s->n_out_main == 1)
+            memcpy(s->out[1], s->out[0], (size_t)s->block * sizeof(float));
         else
-            memset(S.out[c], 0, (size_t)S.block * sizeof(float));
+            memset(s->out[c], 0, (size_t)s->block * sizeof(float));
     }
-    S.out_n = S.block;
-    return (double)(++S.out_token);
+    s->out_n = s->block;
+    return (s->out_token = next_token(s, s->out_token));
 }
 
 /* ---------------------------------------------------------------- *
  * 10. The output block
  * ---------------------------------------------------------------- */
 
-static int out_ok(double dep) {
-    return S.open && S.out_token != 0 && (long)(dep + 0.5) == S.out_token;
+static int out_ok(state_t *s, double dep) {
+    return s->open && s->out_token != 0 && token_matches(s, dep, s->out_token);
 }
 
-double clap_out_sample(double dep, double i, double ch) {
-    if (!out_ok(dep)) return NAN;
+static double clap_out_sample_ctx(state_t *s, double dep, double i, double ch) {
+    if (!out_ok(s, dep)) return NAN;
     long k = (long)(i + 0.5), c = (long)(ch + 0.5);
-    if (k < 0 || k >= S.out_n || c < 0 || c >= S.chan) return NAN;
-    return (double)S.out[c][k];
+    if (k < 0 || k >= s->out_n || c < 0 || c >= s->chan) return NAN;
+    return (double)s->out[c][k];
 }
 
-double clap_out_rms(double dep) {
-    if (!out_ok(dep)) return NAN;
-    if (S.out_n <= 0) return 0.0;
-    double s = 0.0;
-    for (long c = 0; c < S.chan; c++)
-        for (long i = 0; i < S.out_n; i++) s += (double)S.out[c][i] * (double)S.out[c][i];
-    return sqrt(s / (double)(S.out_n * S.chan));
+static double clap_out_rms_ctx(state_t *s, double dep) {
+    if (!out_ok(s, dep)) return NAN;
+    if (s->out_n <= 0) return 0.0;
+    double sum = 0.0;
+    for (long c = 0; c < s->chan; c++)
+        for (long i = 0; i < s->out_n; i++) sum += (double)s->out[c][i] * (double)s->out[c][i];
+    return sqrt(sum / (double)(s->out_n * s->chan));
 }
 
-double clap_out_peak(double dep) {
-    if (!out_ok(dep)) return NAN;
+static double clap_out_peak_ctx(state_t *s, double dep) {
+    if (!out_ok(s, dep)) return NAN;
     double m = 0.0;
-    for (long c = 0; c < S.chan; c++)
-        for (long i = 0; i < S.out_n; i++) {
-            double a = fabs((double)S.out[c][i]);
+    for (long c = 0; c < s->chan; c++)
+        for (long i = 0; i < s->out_n; i++) {
+            double a = fabs((double)s->out[c][i]);
             if (a > m) m = a;
         }
     return m;
 }
 
-double clap_out_count(double dep) { return out_ok(dep) ? (double)S.out_n : NAN; }
-double clap_out_valid(double dep) { return out_ok(dep) ? 1.0 : 0.0; }
+static double clap_out_count_ctx(state_t *s, double dep) { return out_ok(s, dep) ? (double)s->out_n : NAN; }
+static double clap_out_valid_ctx(state_t *s, double dep) { return out_ok(s, dep) ? 1.0 : 0.0; }
+
+/* Public entry points: legacy calls address the default instance; _for
+ * calls resolve an independent handle. */
+long clap_host_scan(const char *path) { return clap_host_scan_ctx(&DEFAULT_STATE, path); }
+long clap_host_scan_count(void) { return clap_host_scan_count_ctx(&DEFAULT_STATE); }
+const char *clap_host_scan_id(long i) { return clap_host_scan_id_ctx(&DEFAULT_STATE, i); }
+const char *clap_host_scan_name(long i) { return clap_host_scan_name_ctx(&DEFAULT_STATE, i); }
+const char *clap_host_scan_vendor(long i) { return clap_host_scan_vendor_ctx(&DEFAULT_STATE, i); }
+const char *clap_host_scan_version(long i) { return clap_host_scan_version_ctx(&DEFAULT_STATE, i); }
+const char *clap_host_scan_description(long i) { return clap_host_scan_description_ctx(&DEFAULT_STATE, i); }
+long clap_host_scan_n_features(long i) { return clap_host_scan_n_features_ctx(&DEFAULT_STATE, i); }
+const char *clap_host_scan_feature(long i, long k) { return clap_host_scan_feature_ctx(&DEFAULT_STATE, i, k); }
+int clap_host_open(const char *path, const char *plugin_id, double sample_rate, double block_size, double channels) {
+    return clap_host_open_ctx(&DEFAULT_STATE, path, plugin_id, sample_rate, block_size, channels);
+}
+void clap_host_close(void) { clap_host_close_ctx(&DEFAULT_STATE); }
+const char *clap_host_plugin_name(void) { return clap_host_plugin_name_ctx(&DEFAULT_STATE); }
+
+const char *clap_host_plugin_name_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return "";
+    return clap_host_plugin_name_ctx(s);
+}
+long clap_host_open_index(void) { return clap_host_open_index_ctx(&DEFAULT_STATE); }
+
+long clap_host_open_index_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return -1;
+    return clap_host_open_index_ctx(s);
+}
+long clap_host_n_params(void) { return clap_host_n_params_ctx(&DEFAULT_STATE); }
+
+long clap_host_n_params_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return -1;
+    return clap_host_n_params_ctx(s);
+}
+double clap_host_param_id(long i) { return clap_host_param_id_ctx(&DEFAULT_STATE, i); }
+
+double clap_host_param_id_for(double handle, long i) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_param_id_ctx(s, i);
+}
+double clap_host_param_min(long i) { return clap_host_param_min_ctx(&DEFAULT_STATE, i); }
+
+double clap_host_param_min_for(double handle, long i) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_param_min_ctx(s, i);
+}
+double clap_host_param_max(long i) { return clap_host_param_max_ctx(&DEFAULT_STATE, i); }
+
+double clap_host_param_max_for(double handle, long i) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_param_max_ctx(s, i);
+}
+double clap_host_param_default(long i) { return clap_host_param_default_ctx(&DEFAULT_STATE, i); }
+
+double clap_host_param_default_for(double handle, long i) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_param_default_ctx(s, i);
+}
+const char *clap_host_param_name(long i) { return clap_host_param_name_ctx(&DEFAULT_STATE, i); }
+
+const char *clap_host_param_name_for(double handle, long i) {
+    state_t *s = instance(handle);
+    if (!s) return "";
+    return clap_host_param_name_ctx(s, i);
+}
+double clap_host_param_value(double param_id) { return clap_host_param_value_ctx(&DEFAULT_STATE, param_id); }
+
+double clap_host_param_value_for(double handle, double param_id) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_param_value_ctx(s, param_id);
+}
+double clap_host_latency(void) { return clap_host_latency_ctx(&DEFAULT_STATE); }
+
+double clap_host_latency_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_latency_ctx(s);
+}
+double clap_host_sample_rate(void) { return clap_host_sample_rate_ctx(&DEFAULT_STATE); }
+
+double clap_host_sample_rate_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_sample_rate_ctx(s);
+}
+double clap_host_block_size(void) { return clap_host_block_size_ctx(&DEFAULT_STATE); }
+
+double clap_host_block_size_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_block_size_ctx(s);
+}
+double clap_host_channels(void) { return clap_host_channels_ctx(&DEFAULT_STATE); }
+
+double clap_host_channels_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_channels_ctx(s);
+}
+double clap_host_is_open(void) { return clap_host_is_open_ctx(&DEFAULT_STATE); }
+
+double clap_host_is_open_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return 0;
+    return clap_host_is_open_ctx(s);
+}
+double clap_host_n_audio_in(void) { return clap_host_n_audio_in_ctx(&DEFAULT_STATE); }
+
+double clap_host_n_audio_in_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_n_audio_in_ctx(s);
+}
+double clap_host_n_audio_out(void) { return clap_host_n_audio_out_ctx(&DEFAULT_STATE); }
+
+double clap_host_n_audio_out_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_host_n_audio_out_ctx(s);
+}
+long clap_host_n_process(void) { return clap_host_n_process_ctx(&DEFAULT_STATE); }
+
+long clap_host_n_process_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return -1;
+    return clap_host_n_process_ctx(s);
+}
+void clap_host_reset_counters(void) { clap_host_reset_counters_ctx(&DEFAULT_STATE); }
+
+void clap_host_reset_counters_for(double handle) {
+    state_t *s = instance(handle);
+    if (!s) return;
+    clap_host_reset_counters_ctx(s);
+}
+double clap_in_fill(const double *samples, long n, long channels) {
+    return clap_in_fill_ctx(&DEFAULT_STATE, samples, n, channels);
+}
+
+double clap_in_fill_for(double handle, const double *samples, long n, long channels) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_in_fill_ctx(s, samples, n, channels);
+}
+double clap_in_tone(double t, double waveform, double freq, double amp) {
+    return clap_in_tone_ctx(&DEFAULT_STATE, t, waveform, freq, amp);
+}
+
+double clap_in_tone_for(double handle, double t, double waveform, double freq, double amp) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_in_tone_ctx(s, t, waveform, freq, amp);
+}
+double clap_in_sample(double dep, double i, double ch) { return clap_in_sample_ctx(&DEFAULT_STATE, dep, i, ch); }
+
+double clap_in_sample_for(double handle, double dep, double i, double ch) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_in_sample_ctx(s, dep, i, ch);
+}
+double clap_process(double dep, double id0, double v0, double id1, double v1, double id2, double v2, double id3, double v3) {
+    return clap_process_ctx(&DEFAULT_STATE, dep, id0, v0, id1, v1, id2, v2, id3, v3);
+}
+
+double clap_process_for(double handle, double dep, double id0, double v0, double id1, double v1, double id2, double v2, double id3, double v3) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_process_ctx(s, dep, id0, v0, id1, v1, id2, v2, id3, v3);
+}
+double clap_set_param(double dep, double id, double value) {
+    return clap_set_param_ctx(&DEFAULT_STATE, dep, id, value);
+}
+
+double clap_set_param_for(double handle, double dep, double id, double value) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_set_param_ctx(s, dep, id, value);
+}
+double clap_expect(double dep, double index) { return clap_expect_ctx(&DEFAULT_STATE, dep, index); }
+
+double clap_expect_for(double handle, double dep, double index) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_expect_ctx(s, dep, index);
+}
+double clap_out_sample(double dep, double i, double ch) { return clap_out_sample_ctx(&DEFAULT_STATE, dep, i, ch); }
+
+double clap_out_sample_for(double handle, double dep, double i, double ch) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_out_sample_ctx(s, dep, i, ch);
+}
+double clap_out_rms(double dep) { return clap_out_rms_ctx(&DEFAULT_STATE, dep); }
+
+double clap_out_rms_for(double handle, double dep) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_out_rms_ctx(s, dep);
+}
+double clap_out_peak(double dep) { return clap_out_peak_ctx(&DEFAULT_STATE, dep); }
+
+double clap_out_peak_for(double handle, double dep) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_out_peak_ctx(s, dep);
+}
+double clap_out_count(double dep) { return clap_out_count_ctx(&DEFAULT_STATE, dep); }
+
+double clap_out_count_for(double handle, double dep) {
+    state_t *s = instance(handle);
+    if (!s) return NAN;
+    return clap_out_count_ctx(s, dep);
+}
+double clap_out_valid(double dep) { return clap_out_valid_ctx(&DEFAULT_STATE, dep); }
+
+double clap_out_valid_for(double handle, double dep) {
+    state_t *s = instance(handle);
+    if (!s) return 0;
+    return clap_out_valid_ctx(s, dep);
+}
+
+/* Allocate only at open, never on the audio path. */
+double clap_host_open_instance(const char *path, const char *plugin_id,
+                               double sample_rate, double block_size, double channels) {
+    if (!isfinite(sample_rate) || sample_rate <= 0 ||
+        !isfinite(block_size) || block_size < 1 || block_size > CLAP_HOST_MAX_BLOCK ||
+        floor(block_size) != block_size || !isfinite(channels) || channels < 1 ||
+        channels > CLAP_HOST_MAX_CHAN || floor(channels) != channels) {
+        set_err("invalid CLAP instance sample rate, block size or channel count");
+        return NAN;
+    }
+    if (NEXT_HANDLE >= 9007199254740991.0) {
+        set_err("CLAP instance handle space exhausted");
+        return NAN;
+    }
+    state_t *s = (state_t *)calloc(1, sizeof *s);
+    if (!s) { set_err("out of memory opening CLAP instance"); return NAN; }
+    if (clap_host_open_ctx(s, path, plugin_id, sample_rate, block_size, channels)) {
+        free(s->desc);
+        free(s);
+        return NAN;
+    }
+    s->handle = ++NEXT_HANDLE;
+    s->next = INSTANCES;
+    INSTANCES = s;
+    return s->handle;
+}
+
+void clap_host_close_instance(double handle) {
+    state_t **link = &INSTANCES;
+    while (*link && (*link)->handle != handle) link = &(*link)->next;
+    if (!*link) return; /* idempotent; an old handle never closes a new instance */
+    state_t *s = *link;
+    *link = s->next;
+    clap_host_close_ctx(s);
+    free(s->desc);
+    free(s);
+}
+
+double clap_in_copy_for(double destination, double source, double dep) {
+    state_t *dst = instance(destination), *src = instance(source);
+    if (!dst || !src || !out_ok(src, dep)) return NAN;
+    if (dst->block != src->block || dst->chan != src->chan ||
+        dst->sample_rate != src->sample_rate) {
+        set_err("CLAP chain requires equal block size, channels and sample rate");
+        return NAN;
+    }
+    for (long c = 0; c < dst->chan; c++)
+        memcpy(dst->in[c], src->out[c], (size_t)dst->block * sizeof(float));
+    dst->in_n = dst->block;
+    dst->ev_n = 0;
+    return (dst->in_token = next_token(dst, dst->in_token));
+}
