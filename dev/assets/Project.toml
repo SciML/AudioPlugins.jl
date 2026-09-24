@@ -3,7 +3,7 @@ AudioPlugins = "83119930-5344-4127-8689-15f5870d6d1a"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 
 [sources]
-AudioPlugins = {path = "/home/runner/_work/AudioPlugins.jl/AudioPlugins.jl"}
+AudioPlugins = {path = "/home/runner/work/AudioPlugins.jl/AudioPlugins.jl"}
 
 [compat]
 Documenter = "1"
