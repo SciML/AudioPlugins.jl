@@ -4,13 +4,13 @@
 Robin Gareus' [x42-plugins](https://github.com/x42/x42-plugins) — fourteen LV2
 bundles, 54 plugins — as a collection for
 [AudioPlugins](https://github.com/SciML/AudioPlugins.jl). LV2 collections are
-not registered with [`register_bundle!`](@ref) (that API is CLAP-only); use
-[`lv2_path`](@ref) (or compose [`lv2_default_path`](@ref) with [`lv2_dir`](@ref)):
+not registered with [`register_bundle!`](@ref) (that API is CLAP-only); point
+[`lv2_default_path`](@ref) / [`lv2_scan`](@ref) at [`lv2_dir`](@ref) instead:
 
 ```julia
 using AudioPlugins, X42Plugins
 
-path = lv2_path()
+path = lv2_default_path(lv2_dir())
 lv2_scan(path)   # 54 plugins
 lv2_open!(path; uri = "http://gareus.org/oss/lv2/nodelay",
           sample_rate = 48000, block_size = 256, channels = 1)
@@ -42,17 +42,15 @@ See AudioPlugins' "Known limits".
 """
 module X42Plugins
 
-using AudioPlugins: lv2_default_path
 using X42Plugins_jll: X42Plugins_jll
 
-export lv2_dir, lv2_path
+export lv2_dir
 
 """
     lv2_dir() -> String
 
 Absolute path of the directory that contains the fourteen `.lv2` bundles from
-`X42Plugins_jll` (i.e. `…/share/lv2`). Prefer [`lv2_path`](@ref) for scanning
-and hosting; that wraps this directory with
+`X42Plugins_jll` (i.e. `…/share/lv2`). Pass it to
 [`AudioPlugins.lv2_default_path`](@ref) so lilv also sees the LV2 specification
 bundles from `lv2_jll`.
 """
@@ -60,13 +58,5 @@ function lv2_dir()
     # balance_lv2 is …/share/lv2/balance.lv2/manifest.ttl
     return dirname(dirname(X42Plugins_jll.balance_lv2))
 end
-
-"""
-    lv2_path() -> String
-
-`lv2_default_path(lv2_dir())` — the LV2 search path that includes this
-collection and the specification bundles from `lv2_jll`.
-"""
-lv2_path() = lv2_default_path(lv2_dir())
 
 end # module

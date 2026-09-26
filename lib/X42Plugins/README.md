@@ -9,13 +9,12 @@ the artifact's, not this package's. The MIT licence covers only the few lines of
 Julia that expose the bundle directory.
 
 LV2 collections do **not** go through `register_bundle!` (that API is
-CLAP-only). Use `lv2_path` (or compose `lv2_default_path` / `lv2_scan` with
-`lv2_dir` yourself):
+CLAP-only). Point `lv2_default_path` / `lv2_scan` at `lv2_dir`:
 
 ```julia
 using AudioPlugins, X42Plugins
 
-path = lv2_path()
+path = lv2_default_path(lv2_dir())
 lv2_scan(path)   # 54 plugins
 lv2_open!(path; uri = "http://gareus.org/oss/lv2/nodelay",
           sample_rate = 48000, block_size = 256, channels = 1)
