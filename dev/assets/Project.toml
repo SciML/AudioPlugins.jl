@@ -1,0 +1,24 @@
+[deps]
+Airwindows = "9cc1a618-9a92-4798-b2a9-a332ae69385c"
+AudioPlugins = "83119930-5344-4127-8689-15f5870d6d1a"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+DragonflyReverb = "3f37e322-345f-4d65-ad90-7ccaf7a8ddb7"
+LSPPlugins = "92a2e151-26df-43ce-a7a1-a77031d33d1f"
+X42Plugins = "297536de-37a4-4356-b273-3a424947924d"
+ZamPlugins = "322054b8-bd02-4d02-941a-4d0914a9b96b"
+
+[sources]
+Airwindows = {path = "../lib/Airwindows"}
+AudioPlugins = {path = "/home/runner/work/AudioPlugins.jl/AudioPlugins.jl"}
+DragonflyReverb = {path = "../lib/DragonflyReverb"}
+LSPPlugins = {path = "../lib/LSPPlugins"}
+X42Plugins = {path = "../lib/X42Plugins"}
+ZamPlugins = {path = "../lib/ZamPlugins"}
+
+[compat]
+Airwindows = "1"
+Documenter = "1"
+DragonflyReverb = "1"
+LSPPlugins = "1"
+X42Plugins = "1"
+ZamPlugins = "1"
