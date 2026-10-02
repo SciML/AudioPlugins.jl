@@ -7,15 +7,16 @@ Pkg.add(&quot;AudioPlugins&quot;)</code></pre><p>Hosting needs no C toolchain: t
   <span class="sgr90">[3f37e322] </span>DragonflyReverb v1.0.0 `../lib/DragonflyReverb`
   <span class="sgr90">[92a2e151] </span>LSPPlugins v1.0.0 `../lib/LSPPlugins`
   <span class="sgr90">[297536de] </span>X42Plugins v1.0.0 `../lib/X42Plugins`
+  <span class="sgr90">[49cf472b] </span>X42PluginsGPL3 v1.0.0 `../lib/X42PluginsGPL3`
   <span class="sgr90">[322054b8] </span>ZamPlugins v1.0.0 `../lib/ZamPlugins`</code></pre></details><details><summary>and using this machine and Julia version.</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Julia Version 1.13.1
 Commit 96ca370cf0e (2026-09-25 19:34 UTC)
 Build Info:
   Official https://julialang.org release
 Platform Info:
   OS: Linux (x86_64-linux-gnu)
-  CPU: 4 × AMD EPYC 9V74 80-Core Processor
+  CPU: 4 × INTEL(R) XEON(R) PLATINUM 8573C
   WORD_SIZE: 64
-  LLVM: libLLVM-20.1.8 (ORCJIT, znver4)
+  LLVM: libLLVM-20.1.8 (ORCJIT, emeraldrapids)
   GC: Built with stock GC
 Threads: 1 default, 1 interactive, 1 GC (on 4 virtual cores)</code></pre></details><details><summary>A more complete overview of all dependencies and their versions is also provided.</summary><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr32"><span class="sgr1">Status</span></span> `~/work/AudioPlugins.jl/AudioPlugins.jl/docs/Manifest.toml`
   <span class="sgr90">[a4c015fc] </span>ANSIColoredPrinters v0.0.1
@@ -41,6 +42,7 @@ Threads: 1 default, 1 interactive, 1 GC (on 4 virtual cores)</code></pre></detai
   <span class="sgr90">[ec057cc2] </span>StructUtils v2.9.2
   <span class="sgr90">[3bb67fe8] </span>TranscodingStreams v0.11.3
   <span class="sgr90">[297536de] </span>X42Plugins v1.0.0 `../lib/X42Plugins`
+  <span class="sgr90">[49cf472b] </span>X42PluginsGPL3 v1.0.0 `../lib/X42PluginsGPL3`
   <span class="sgr90">[322054b8] </span>ZamPlugins v1.0.0 `../lib/ZamPlugins`
   <span class="sgr90">[6aebe50b] </span>Airwindows_jll v1.0.0+0
   <span class="sgr90">[c9c4f589] </span>CLAPHost_jll v1.2.0+0
@@ -61,10 +63,15 @@ Threads: 1 default, 1 interactive, 1 GC (on 4 virtual cores)</code></pre></detai
   <span class="sgr90">[ce0ebd57] </span>Sord_jll v0.16.22+0
   <span class="sgr90">[6b463614] </span>Sratom_jll v0.6.22+0
   <span class="sgr90">[8b4e5a1f] </span>VST3Host_jll v1.2.0+0
+  <span class="sgr90">[609484c3] </span>X42Darc_jll v2025.6.6+0
+  <span class="sgr90">[478272cf] </span>X42Dpl_jll v2025.6.6+0
+  <span class="sgr90">[0b70f700] </span>X42Fat1_jll v2025.6.6+0
   <span class="sgr90">[e4ef0e30] </span>X42Plugins_jll v2025.6.6+0
+  <span class="sgr90">[45bf65ab] </span>X42Zconvo_jll v2025.6.6+0
   <span class="sgr90">[32b042d7] </span>ZamPlugins_jll v4.5.0+0
   <span class="sgr90">[bd2968d2] </span>Zix_jll v0.8.2+0
   <span class="sgr90">[45378030] </span>alsa_jll v1.2.15+0
+  <span class="sgr90">[9427e74d] </span>libsamplerate_jll v0.1.10+0
   <span class="sgr90">[5bf562c0] </span>libsndfile_jll v1.2.2+0
   <span class="sgr90">[f27f6e37] </span>libvorbis_jll v1.3.8+0
   <span class="sgr90">[7b3f7994] </span>lv2_jll v1.18.10+0
@@ -106,4 +113,4 @@ Threads: 1 default, 1 interactive, 1 GC (on 4 virtual cores)</code></pre></detai
   <span class="sgr90">[3161d3a3] </span>Zstd_jll v1.5.7+1
   <span class="sgr90">[8e850ede] </span>nghttp2_jll v1.67.1+0
   <span class="sgr90">[3f19e933] </span>p7zip_jll v17.8.2+0
-<span class="sgr36"><span class="sgr1">Info</span></span> Packages marked with <span class="sgr33">⌅</span> have new versions available but compatibility constraints restrict them from upgrading. To see why use `status --outdated -m`</code></pre></details><p>You can also download the <a href="https://github.com/SciML/AudioPlugins.jl/tree/gh-pages/v1.7.0/assets/Manifest.toml">manifest</a> file and the <a href="https://github.com/SciML/AudioPlugins.jl/tree/gh-pages/v1.7.0/assets/Project.toml">project</a> file.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="hosting/">Hosting a plugin »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Friday 2 October 2026 16:01">Friday 2 October 2026</span>. Using Julia version 1.13.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+<span class="sgr36"><span class="sgr1">Info</span></span> Packages marked with <span class="sgr33">⌅</span> have new versions available but compatibility constraints restrict them from upgrading. To see why use `status --outdated -m`</code></pre></details><p>You can also download the <a href="https://github.com/SciML/AudioPlugins.jl/tree/gh-pages/v1.7.0/assets/Manifest.toml">manifest</a> file and the <a href="https://github.com/SciML/AudioPlugins.jl/tree/gh-pages/v1.7.0/assets/Project.toml">project</a> file.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="hosting/">Hosting a plugin »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.19.0 on <span class="colophon-date" title="Friday 2 October 2026 18:56">Friday 2 October 2026</span>. Using Julia version 1.13.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

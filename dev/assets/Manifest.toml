@@ -2,7 +2,7 @@
 
 julia_version = "1.13.1"
 manifest_format = "2.1"
-project_hash = "0f05166b1a597e915e01b4d3fc6b05fbe8b49c82"
+project_hash = "167f7831169c1140194e60189e0ea519bfaeb7bd"
 
 [[deps.ANSIColoredPrinters]]
 git-tree-sha1 = "574baf8110975760d391c710b6341da1afa48d8c"
@@ -467,10 +467,37 @@ registries = "General"
 uuid = "8b4e5a1f-1c28-515c-95ad-97e06c9f19bd"
 version = "1.2.0+0"
 
+[[deps.X42Darc_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "lv2_jll"]
+git-tree-sha1 = "08dbd977733d52ee2745e9a99359a9f0f18299a5"
+registries = "General"
+uuid = "609484c3-cba8-5ae9-80ba-2b7881f0da51"
+version = "2025.6.6+0"
+
+[[deps.X42Dpl_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "lv2_jll"]
+git-tree-sha1 = "02c6c8d12ba3fe77a6395a8e5aab5a7d25c7f955"
+registries = "General"
+uuid = "478272cf-bcff-54f5-87a8-77f6f1beccd4"
+version = "2025.6.6+0"
+
+[[deps.X42Fat1_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "FFTW_jll", "JLLWrappers", "Libdl", "lv2_jll"]
+git-tree-sha1 = "703224254190609a9017a668d9c898fcf9b04669"
+registries = "General"
+uuid = "0b70f700-5e21-5582-b962-a78d9702e098"
+version = "2025.6.6+0"
+
 [[deps.X42Plugins]]
 deps = ["AudioPlugins", "X42Plugins_jll"]
 path = "../lib/X42Plugins"
 uuid = "297536de-37a4-4356-b273-3a424947924d"
+version = "1.0.0"
+
+[[deps.X42PluginsGPL3]]
+deps = ["AudioPlugins", "X42Darc_jll", "X42Dpl_jll", "X42Fat1_jll", "X42Zconvo_jll"]
+path = "../lib/X42PluginsGPL3"
+uuid = "49cf472b-c535-4f2f-acfd-db2acdac01da"
 version = "1.0.0"
 
 [[deps.X42Plugins_jll]]
@@ -478,6 +505,13 @@ deps = ["Artifacts", "CompilerSupportLibraries_jll", "FFTW_jll", "JLLWrappers", 
 git-tree-sha1 = "306c77a598d3ffc3519d9ec099071ef0de1bd228"
 registries = "General"
 uuid = "e4ef0e30-8fd3-52a3-9a4c-b77be1284e2a"
+version = "2025.6.6+0"
+
+[[deps.X42Zconvo_jll]]
+deps = ["Artifacts", "CompilerSupportLibraries_jll", "FFTW_jll", "JLLWrappers", "Libdl", "libsamplerate_jll", "libsndfile_jll", "lv2_jll"]
+git-tree-sha1 = "16cd81e1a4cdfa733b5e60a83498a3559023a809"
+registries = "General"
+uuid = "45bf65ab-e82d-59c6-9519-20e96b219bf4"
 version = "2025.6.6+0"
 
 [[deps.ZamPlugins]]
@@ -516,6 +550,13 @@ git-tree-sha1 = "704ac2a76946288246db882524d7785b2ea6b49e"
 registries = "General"
 uuid = "45378030-f8ea-5b20-a7c7-1a9d95efb90e"
 version = "1.2.15+0"
+
+[[deps.libsamplerate_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "cb1c10125a8dc0c2abdb601afa71ae2e85c5f444"
+registries = "General"
+uuid = "9427e74d-4e05-59c1-8ff3-7d74b6e52ac8"
+version = "0.1.10+0"
 
 [[deps.libsndfile_jll]]
 deps = ["Artifacts", "FLAC_jll", "JLLWrappers", "Libdl", "Ogg_jll", "Opus_jll", "alsa_jll", "libvorbis_jll"]
