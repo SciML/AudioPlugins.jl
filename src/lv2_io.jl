@@ -467,6 +467,11 @@ in the contract: `dep`'s block is **consumed** — afterwards [`lv2_in_sample`](
 returns `NaN` on it and a second `lv2_process` on the same `dep` refuses, so
 queued events can never replay. `clp_process` leaves the block readable and
 lets it run again.
+
+Processing runs on the caller's thread and is not realtime-safe: garbage
+collection, allocation, and solver retries can delay blocks. Suitable for offline
+use, not a live stream with a deadline. See the README's
+[Known limits](https://github.com/SciML/AudioPlugins.jl#known-limits).
 """
 lv2_process(dep, id0, v0, id1, v1, id2, v2, id3, v3) =
     ccall(

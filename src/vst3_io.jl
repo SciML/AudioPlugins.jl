@@ -406,6 +406,11 @@ The VST3 counterpart of [`AudioPlugins.clp_process`](@ref). The `id`s are VST3
 `ParamID`s (see [`vst3_params`](@ref)) and the values are **normalised to
 `0..1`**, which is what the processor consumes through `inputParameterChanges`;
 [`vst3_param_normalized`](@ref) converts from plain units.
+
+Processing runs on the caller's thread and is not realtime-safe: garbage
+collection, allocation, and solver retries can delay blocks. Suitable for offline
+use, not a live stream with a deadline. See the README's
+[Known limits](https://github.com/SciML/AudioPlugins.jl#known-limits).
 """
 vst3_process(dep, id0, v0, id1, v1, id2, v2, id3, v3) =
     ccall(

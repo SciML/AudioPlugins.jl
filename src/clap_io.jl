@@ -674,6 +674,11 @@ Errors when the plugin was not opened with `compensate_latency = true`. The
 silence is pushed through once; each channel's tail is computed on that
 channel's first call, and a repeat call returns it again — the same
 read-is-idempotent convention as [`clap_out`](@ref).
+
+Processing runs on the caller's thread and is not realtime-safe: garbage
+collection, allocation, and solver retries can delay blocks. Suitable for offline
+use, not a live stream with a deadline. See the README's
+[Known limits](https://github.com/SciML/AudioPlugins.jl#known-limits).
 """
 function clap_flush!(; channel::Integer = 0)
     comp = _COMP[]
@@ -729,10 +734,13 @@ clp_in_tone(t, waveform, freq, amp) =
 
 """
     AudioPlugins.clp_process(dep, id0, v0, id1, v1, id2, v2, id3, v3) -> token
+    AudioPlugins.clp_process(instance, dep, id0, v0, id1, v1, id2, v2, id3, v3) -> token
 
 Run the plugin over the input block named by `dep` and return the output
 block's token, which [`clap_out`](@ref) and the `clp_out_*` readers then take.
-This is the whole of the processing path: one equation, one call.
+This is the whole of the processing path: one equation, one call. Pass a
+[`ClapInstance`](@ref) or its numeric handle as `instance` to process an
+independent plugin instead of the default plugin.
 
 Up to four parameters are driven per block by the four `(id, value)` slots,
 pushed into the plugin's input event list as `CLAP_EVENT_PARAM_VALUE` — the
@@ -745,6 +753,11 @@ the `id` field of [`clap_params`](@ref).
 Returns `NaN` when nothing is open, or when `dep` does not name the *current*
 input block: a stale token is refused rather than answered from whatever the
 buffer still holds.
+
+Processing runs on the caller's thread and is not realtime-safe: garbage
+collection, allocation, and solver retries can delay blocks. Suitable for offline
+use, not a live stream with a deadline. See the README's
+[Known limits](https://github.com/SciML/AudioPlugins.jl#known-limits).
 """
 clp_process(dep, id0, v0, id1, v1, id2, v2, id3, v3) =
     ccall(
