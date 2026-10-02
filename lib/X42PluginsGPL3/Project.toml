@@ -1,0 +1,33 @@
+name = "X42PluginsGPL3"
+uuid = "49cf472b-c535-4f2f-acfd-db2acdac01da"
+authors = ["JuliaHub, Inc. and contributors"]
+version = "1.0.0"
+
+[deps]
+AudioPlugins = "83119930-5344-4127-8689-15f5870d6d1a"
+X42Darc_jll = "609484c3-cba8-5ae9-80ba-2b7881f0da51"
+X42Dpl_jll = "478272cf-bcff-54f5-87a8-77f6f1beccd4"
+X42Fat1_jll = "0b70f700-5e21-5582-b962-a78d9702e098"
+X42Zconvo_jll = "45bf65ab-e82d-59c6-9519-20e96b219bf4"
+
+[sources]
+AudioPlugins = {path = "../.."}
+
+[compat]
+AudioPlugins = "1.5"
+SafeTestsets = "0.1"
+SciMLTesting = "2.13"
+Test = "1"
+X42Darc_jll = "2025.6"
+X42Dpl_jll = "2025.6"
+X42Fat1_jll = "2025.6"
+X42Zconvo_jll = "2025.6"
+julia = "1.10"
+
+[extras]
+SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
+SciMLTesting = "09d9d899-5365-40a9-917a-5f67fddea283"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["SafeTestsets", "SciMLTesting", "Test"]

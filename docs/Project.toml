@@ -5,6 +5,7 @@ Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 DragonflyReverb = "3f37e322-345f-4d65-ad90-7ccaf7a8ddb7"
 LSPPlugins = "92a2e151-26df-43ce-a7a1-a77031d33d1f"
 X42Plugins = "297536de-37a4-4356-b273-3a424947924d"
+X42PluginsGPL3 = "49cf472b-c535-4f2f-acfd-db2acdac01da"
 ZamPlugins = "322054b8-bd02-4d02-941a-4d0914a9b96b"
 
 [sources]
@@ -12,6 +13,7 @@ Airwindows = {path = "../lib/Airwindows"}
 DragonflyReverb = {path = "../lib/DragonflyReverb"}
 LSPPlugins = {path = "../lib/LSPPlugins"}
 X42Plugins = {path = "../lib/X42Plugins"}
+X42PluginsGPL3 = {path = "../lib/X42PluginsGPL3"}
 ZamPlugins = {path = "../lib/ZamPlugins"}
 
 [compat]
@@ -20,4 +22,5 @@ Documenter = "1"
 DragonflyReverb = "1"
 LSPPlugins = "1"
 X42Plugins = "1"
+X42PluginsGPL3 = "1"
 ZamPlugins = "1"

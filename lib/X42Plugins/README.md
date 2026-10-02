@@ -53,9 +53,9 @@ Read from each submodule at the pins of meta-repo `3fb6abe`:
 - **GPL-2.0-or-later but not headless:** fil4 and tuna (cairo in DSP), spectra
   (OpenGL mandatory), mixtri (libltc).
 
-dpl (limiter), fat1 (autotune), darc (compressor) and zconvo (convolver) build
-headless and are useful; they are not packaged here. A separate JLL for them is
-a possible follow-up.
+dpl (limiter), fat1 (autotune), darc (compressor) and zconvo (convolver) are
+packaged separately, under GPL-3.0-or-later, as `X42PluginsGPL3`
+(`lib/X42PluginsGPL3`).
 
 ## Opt-in, and that is the point
 

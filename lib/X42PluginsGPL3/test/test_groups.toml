@@ -1,0 +1,18 @@
+# The sublibrary CI matrix: SublibraryCI.yml expands this file into one leg per
+# section x version. The four X42* JLLs are expected on Linux, macOS and Windows
+# where BinaryBuilder produces the artifacts; declare all three OS legs.
+[Core]
+versions = ["lts", "1"]
+runner = "ubuntu-latest"
+
+[Core-macOS]
+versions = ["lts", "1"]
+runner = "macos-latest"
+
+[Core-Windows]
+versions = ["lts", "1"]
+runner = "windows-latest"
+
+# Centrally clamped to julia "1".
+[QA]
+versions = ["1"]

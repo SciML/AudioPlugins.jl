@@ -29,6 +29,13 @@ X42Plugins
 lv2_dir
 ```
 
+## X42PluginsGPL3 API
+
+```@docs
+X42PluginsGPL3
+lv2_path
+```
+
 ## ZamPlugins API
 
 ```@docs

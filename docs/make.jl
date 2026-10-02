@@ -1,5 +1,5 @@
 using Documenter, AudioPlugins
-using Airwindows, DragonflyReverb, LSPPlugins, X42Plugins, ZamPlugins
+using Airwindows, DragonflyReverb, LSPPlugins, X42Plugins, X42PluginsGPL3, ZamPlugins
 
 cp("./docs/Manifest.toml", "./docs/src/assets/Manifest.toml", force = true)
 cp("./docs/Project.toml", "./docs/src/assets/Project.toml", force = true)
@@ -11,6 +11,7 @@ makedocs(
         DragonflyReverb,
         LSPPlugins,
         X42Plugins,
+        X42PluginsGPL3,
         ZamPlugins,
     ],
     sitename = "AudioPlugins.jl",

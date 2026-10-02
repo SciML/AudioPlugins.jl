@@ -30,6 +30,7 @@ preference, for the reason given under
 | Dragonfly Reverb | [dragonfly-reverb](https://github.com/michaelwillis/dragonfly-reverb) | GPL-3.0-or-later | Shipped: `DragonflyReverb_jll` 3.2.10 is registered and `lib/DragonflyReverb` is in this repository |
 | ZamPlugins | [zam-plugins](https://github.com/zamaudio/zam-plugins) | GPL-2.0-or-later for the sixteen plugins packaged; the upstream repository is not uniformly so (see below) | Shipped: `ZamPlugins_jll` 4.5.0 is registered and `lib/ZamPlugins` is in this repository |
 | x42-plugins | [x42-plugins](https://github.com/x42/x42-plugins) | GPL-2.0-or-later for the fourteen submodules packaged; the meta-repo is not uniformly so (see below) | Shipped: `X42Plugins_jll` and `lib/X42Plugins` — 54 headless LV2 plugins. LV2 collections are not `register_bundle!`'d; use `lv2_default_path(X42Plugins.lv2_dir())` |
+| x42-plugins, GPL-3.0-or-later part | [darc](https://github.com/x42/darc.lv2), [dpl](https://github.com/x42/dpl.lv2), [fat1](https://github.com/x42/fat1.lv2), [zconvo](https://github.com/x42/zconvo.lv2) | GPL-3.0-or-later (see below) | Shipped: `X42Darc_jll`, `X42Dpl_jll`, `X42Fat1_jll`, `X42Zconvo_jll` and `lib/X42PluginsGPL3` — 13 headless LV2 plugins, 7 of which this host opens. Use `X42PluginsGPL3.lv2_path()` |
 
 "Proposed" means exactly that: no recipe, no JLL, no sublibrary, and no commitment that
 one is coming. It is the list from
@@ -87,12 +88,39 @@ lv2_open!(path; uri = "http://gareus.org/oss/lv2/nodelay",
 needs `worker:schedule`, which this host does not provide — it is in the artifact
 and enumerated by `lv2_scan`, but `lv2_open!` refuses it (53 of 54 open).
 
-Not packaged: dpl, fat1, meters, sisco, zconvo (GPL-3.0-or-later source; meters and
-sisco also need cairo/OpenGL); darc (sources are GPL-2.0-or-later, but its `COPYING`
-is GPLv3); and the GPL-2.0-or-later plugins that do not build headless (fil4, tuna,
-spectra, mixtri). dpl (limiter), fat1 (autotune), darc (compressor) and zconvo
-(convolver) build headless and are useful; they are not packaged here. A separate
-JLL for them is a possible follow-up.
+Not in `X42Plugins_jll`: meters and sisco (GPL-3.0-or-later source; also need
+cairo/OpenGL); and the GPL-2.0-or-later plugins that do not build headless (fil4,
+tuna, spectra, mixtri). darc, dpl, fat1 and zconvo ship under
+[X42PluginsGPL3](@ref X42PluginsGPL3-section) below.
+
+### [X42PluginsGPL3](@id X42PluginsGPL3-section)
+
+The four x42-plugins submodules whose binaries are GPL-3.0-or-later, from the same pin
+`3fb6abe`, built headless: darc (compressor), dpl (digital peak limiter), fat1
+(autotune) and zconvo (zero-latency convolver) — **13** plugins. They ship as four
+JLLs (`X42Darc_jll`, `X42Dpl_jll`, `X42Fat1_jll`, `X42Zconvo_jll`) and one sublibrary
+so that `X42Plugins` stays GPL-2.0-or-later. Each JLL has its own `share/lv2`;
+[`lv2_path`](@ref) joins them (plus the LV2 specification bundles) for the host.
+
+```julia
+using AudioPlugins, X42PluginsGPL3
+
+path = lv2_path()
+lv2_scan(path)             # 13
+lv2_open!(path; uri = "http://gareus.org/oss/lv2/dpl#stereo",
+          sample_rate = 48000, block_size = 256, channels = 2)
+```
+
+Why each is GPL-3.0-or-later: darc's `COPYING` is the GPLv3 text (its headers say
+v2-or-later); dpl compiles Fons Adriaensen's v3-or-later `peaklim`; fat1 compiles
+zita-resampler (v3-or-later) although its `COPYING` is GPLv2; zconvo compiles
+`zeta-convolver`, a modified zita-convolver (v3-or-later), although its `COPYING` is
+GPLv2. fat1 and zconvo link `libfftw3f` (`FFTW_jll`); zconvo also links `libsndfile`
+(LGPL-2.1-or-later) and `libsamplerate` (BSD-2-Clause).
+
+darc, dpl and fat1 (seven plugins) open and process audio. The six zconvo plugins
+require `worker:schedule` and `options:options`, which this host does not provide:
+`lv2_scan` lists them and `lv2_open!` refuses them.
 
 ### Airwindows
 
