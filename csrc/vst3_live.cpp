@@ -1,3 +1,4 @@
+#define AP_LIVE_BUILD 1
 /* Per-session VST3 adapter. All SDK/controller work stays on control;
  * only setProcessing and process run on the native processing thread. */
 #include "live_adapter.h"

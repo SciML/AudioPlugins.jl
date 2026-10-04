@@ -3,9 +3,9 @@
 #ifndef AP_CLAP_LIVE_H
 #define AP_CLAP_LIVE_H
 #include <stdint.h>
-#if defined(_WIN32)
+#if defined(_WIN32) && defined(AP_LIVE_BUILD)
 #define AP_LIVE_API __declspec(dllexport)
-#elif defined(__GNUC__)
+#elif defined(__GNUC__) && !defined(_WIN32)
 #define AP_LIVE_API __attribute__((visibility("default")))
 #else
 #define AP_LIVE_API

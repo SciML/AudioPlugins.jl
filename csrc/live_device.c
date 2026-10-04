@@ -1,3 +1,4 @@
+#define AP_LIVE_BUILD 1
 /* miniaudio supplies native device transport, not the processing scheduler.
  * Each device block clocks an independent fixed-identity processing worker. */
 #define MA_NO_DECODING

@@ -1,3 +1,4 @@
+#define _DARWIN_C_SOURCE 1
 #define _POSIX_C_SOURCE 200809L
 #include "../csrc/clap_live.h"
 #include <assert.h>

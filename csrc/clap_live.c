@@ -1,3 +1,4 @@
+#define AP_LIVE_BUILD 1
 #define _GNU_SOURCE
 #include "clap_live.h"
 #include "live_adapter.h"

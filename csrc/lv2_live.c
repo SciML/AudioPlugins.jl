@@ -1,3 +1,4 @@
+#define AP_LIVE_BUILD 1
 /* Isolated LV2 live adapter. lilv is confined to initialization/destruction. */
 #include "live_adapter.h"
 #include <lilv/lilv.h>
@@ -12,7 +13,7 @@
 #include <string.h>
 #define PORTS 512
 #define URIDS 1024
-#define ATOM_BYTES 4096
+#define ATOM_BYTES 65536
 typedef struct {
     clap_plugin_t api;
     const clap_host_t *host;
@@ -23,6 +24,7 @@ typedef struct {
     uint32_t nports, nparams, ninputs, noutputs, input[2], output[2], params[PORTS];
     clap_param_info_t info[PORTS];
     float control[PORTS];
+    uint8_t disconnected[PORTS];
     float *audio;
     int atom_in, atom_out, midi_input, latency_port;
     union { uint64_t alignment; uint8_t bytes[ATOM_BYTES]; } midi_in, midi_out;
@@ -223,6 +225,13 @@ static const clap_plugin_t *create(const clap_host_t *h, const char *path, const
                 if (name) { strncpy(info->name, lilv_node_as_string(name), sizeof(info->name) - 1); lilv_node_free(name); }
             }
         } else if (is_port(s, port, LV2_ATOM__AtomPort)) {
+            LilvNode *midi = lilv_new_uri(s->world, LV2_MIDI__MidiEvent);
+            int accepts_midi = lilv_port_supports_event(s->descriptor, port, midi);
+            lilv_node_free(midi);
+            if (input && !accepts_midi) {
+                if (!property(s, port, LV2_CORE__connectionOptional)) goto fail;
+                s->disconnected[i] = 1; continue;
+            }
             int *slot = input ? &s->atom_in : &s->atom_out;
             if (*slot >= 0) goto fail;
             LilvNode *property = lilv_new_uri(s->world, LV2_ATOM__bufferType);
@@ -234,9 +243,7 @@ static const clap_plugin_t *create(const clap_host_t *h, const char *path, const
             valid = !size || lilv_node_as_float(size) <= ATOM_BYTES; lilv_node_free(size);
             if (!valid) goto fail;
             *slot = (int)i;
-            LilvNode *midi = lilv_new_uri(s->world, LV2_MIDI__MidiEvent);
-            if (input) s->midi_input = lilv_port_supports_event(s->descriptor, port, midi);
-            lilv_node_free(midi);
+            if (input) s->midi_input = accepts_midi;
         } else goto fail;
     }
     if (s->ninputs != c->channels || s->noutputs != c->channels) goto fail;
@@ -244,7 +251,7 @@ static const clap_plugin_t *create(const clap_host_t *h, const char *path, const
     s->audio = calloc((size_t)(s->ninputs + s->noutputs) * c->block_size, sizeof(float)); if (!s->audio) goto fail;
     s->sequence = map_uri(s, LV2_ATOM__Sequence); s->midi = map_uri(s, LV2_MIDI__MidiEvent); s->chunk = map_uri(s, LV2_ATOM__Chunk);
     s->instance = lilv_plugin_instantiate(s->descriptor, c->sample_rate, s->feature_ptrs); if (!s->instance) goto fail;
-    for (uint32_t i = 0; i < s->nports; ++i) lilv_instance_connect_port(s->instance, i, &s->control[i]);
+    for (uint32_t i = 0; i < s->nports; ++i) lilv_instance_connect_port(s->instance, i, s->disconnected[i] ? NULL : &s->control[i]);
     for (uint32_t i = 0; i < s->ninputs; ++i) lilv_instance_connect_port(s->instance, s->input[i], s->audio + i * c->block_size);
     for (uint32_t i = 0; i < s->noutputs; ++i) lilv_instance_connect_port(s->instance, s->output[i], s->audio + (s->ninputs + i) * c->block_size);
     if (s->atom_in >= 0) lilv_instance_connect_port(s->instance, (uint32_t)s->atom_in, s->midi_in.bytes);

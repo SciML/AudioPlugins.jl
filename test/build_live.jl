@@ -19,7 +19,7 @@ function build_live(dir)
     end
     hosting = joinpath(sdk, "public.sdk", "source", "vst", "hosting")
     platform = if Sys.iswindows()
-        ["-lavrt", "-lole32", "-luuid", "-luser32", "-lwinmm", "-lshlwapi", "-lshell32", "-Wl,--export-all-symbols"]
+        ["-lavrt", "-lole32", "-luuid", "-luser32", "-lwinmm", "-lshlwapi", "-lshell32", "-Wl,--export-all-symbols", "-static-libstdc++", "-static-libgcc"]
     elseif Sys.isapple()
         ["-framework", "CoreFoundation", "-framework", "CoreAudio", "-framework", "AudioToolbox", "-framework", "Cocoa"]
     else
@@ -41,4 +41,25 @@ function build_live(dir)
          $(lilv.liblilv_path) -L$sdklib -lsdk_hosting -lsdk_common -lsdk -lbase -lpluginterfaces
          -pthread $platform -o $library`)
     return library, (sdk, sdklib)
+end
+
+function build_vst_live_fixture(dir, sdk_paths)
+    sdk, lib = sdk_paths
+    cxx = AudioPlugins._cxx_compiler()
+    bundle = joinpath(dir, "live.vst3")
+    inner = joinpath(bundle, "Contents", AudioPlugins._vst3_module_dir())
+    mkpath(inner)
+    entry, name, platform = if Sys.iswindows()
+        ("dllmain.cpp", "live.vst3", ["-lole32", "-static-libstdc++", "-static-libgcc"])
+    elseif Sys.isapple()
+        ("macmain.cpp", "live", ["-framework", "CoreFoundation"])
+    else
+        ("linuxmain.cpp", "live.so", String[])
+    end
+    output = joinpath(inner, name)
+    source = joinpath(@__DIR__, "plugins", "ap_test_vst3_live.cpp")
+    run(`$cxx $(AudioPlugins._c_arch_flags()) -std=c++17 -O2 -fPIC -shared -DRELEASE=1 -I$sdk
+         $source $sdk/public.sdk/source/vst/vstsinglecomponenteffect.cpp
+         $sdk/public.sdk/source/main/$entry -L$lib -lsdk -lsdk_common -lbase -lpluginterfaces -pthread $platform -o $output`)
+    return bundle
 end
