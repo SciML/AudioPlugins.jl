@@ -41,4 +41,4 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 vst3sdk_jll = "5fb43a78-d80e-51e2-8ddb-474e9b1a8821"
 
 [targets]
-test = ["JuliaC", "Libdl", "SafeTestsets", "SciMLTesting", "Test", "vst3sdk_jll"]
+test = ["JuliaC", "SafeTestsets", "SciMLTesting", "Test", "vst3sdk_jll"]

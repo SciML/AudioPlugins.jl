@@ -16,7 +16,7 @@ is for.
 
 Tracked as [issue #7](https://github.com/SciML/AudioPlugins.jl/issues/7).
 
-## No realtime discipline in the synchronous hosts
+## [No realtime discipline in the synchronous hosts](@id No-realtime-discipline)
 
 CLAP asks a host to call `process()` from a realtime thread that never blocks, never
 allocates and never takes a lock, and it asks the host to honour the same discipline. A
