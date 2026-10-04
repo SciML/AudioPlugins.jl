@@ -38,6 +38,22 @@ clap_plugin_index
 clap_last_error
 ```
 
+## Experimental live hosting (Linux CLAP)
+
+```@docs
+ClapLiveSession
+LiveEvent
+LiveStats
+live_available
+open_live
+start!
+stop!
+poll!
+try_write!
+try_read!
+live_stats
+```
+
 ## Hosting: the bundle registry
 
 Which `.clap` modules are available, and what is in them. Nothing is registered until
