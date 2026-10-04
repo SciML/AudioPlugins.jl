@@ -1,0 +1,194 @@
+--- a/C/CLAPHost/build_tarballs.jl
++++ b/C/CLAPHost/build_tarballs.jl
+@@ -1,6 +1,8 @@
+ # Note that this script can accept some limited command-line arguments, run
+ # `julia build_tarballs.jl --help` to see a usage message.
+ using BinaryBuilder
++
++include("../../platforms/macos_sdks.jl")
+ 
+ # The headless CLAP host from AudioPlugins.jl (https://github.com/SciML/AudioPlugins.jl):
+ # one C translation unit, `csrc/clap_host.c`, exposing a C ABI of scalar doubles
+@@ -23,28 +25,41 @@
+ # feature-keyword getters that a bundle registry needs to classify what it
+ # found.
+ name = "CLAPHost"
+-version = v"1.2.0"
++version = v"1.3.0"
+ 
+ # Collection of sources required to complete build
+ sources = [
+     GitSource("https://github.com/SciML/AudioPlugins.jl.git",
+-              "f48574da93f3fac9f3d612c16b60657043320c35"),  # SciML/AudioPlugins.jl main
++              ENV["AUDIOPLUGINS_LIVE_COMMIT"]), # Pin the reviewed, merged live-host source.
+ ]
+ 
+ # Bash recipe for building across all platforms
++# Source ABI is additive. Do not publish until the source PR is merged.
++# Require an explicit full commit hash instead of accidentally building a branch.
++@assert occursin(r"^[0-9a-f]{40}$", ENV["AUDIOPLUGINS_LIVE_COMMIT"])
+ script = raw"""
+ cd ${WORKSPACE}/srcdir/AudioPlugins.jl
+-install_license LICENSE csrc/vendor/CLAP-LICENSE
++install_license LICENSE csrc/vendor/CLAP-LICENSE csrc/vendor/miniaudio.LICENSE
++
++LIVE_LIBS="-pthread -lm"
++if [[ "${target}" == *-mingw* ]]; then
++    LIVE_LIBS="${LIVE_LIBS} -lavrt -lole32 -luuid -luser32 -lwinmm"
++elif [[ "${target}" == *-apple-* ]]; then
++    LIVE_LIBS="${LIVE_LIBS} -framework CoreFoundation -framework CoreAudio -framework AudioToolbox"
++else
++    LIVE_LIBS="${LIVE_LIBS} -ldl"
++fi
+ 
+ mkdir -p "${libdir}" "${includedir}"
+-LIBS="-lm"
+-if [[ "${target}" == *-linux-* ]]; then
+-    LIBS="${LIBS} -ldl"
+-fi
+-${CC} -std=gnu99 -O2 -fPIC -shared -Wall -Wextra \
+-    -o "${libdir}/libclap_host.${dlext}" csrc/clap_host.c ${LIBS}
++${CC} -std=gnu11 -O2 -fPIC -shared -Wall -Wextra -DAP_LIVE_WITH_DEVICE \
++    -o "${libdir}/libclap_host.${dlext}" \
++    csrc/clap_host.c csrc/clap_live.c csrc/live_device.c ${LIVE_LIBS}
+ install -Dm644 csrc/clap_host.h "${includedir}/clap_host.h"
++install -Dm644 csrc/clap_live.h "${includedir}/clap_live.h"
++install -Dm644 csrc/live_device.h "${includedir}/live_device.h"
+ """
++
++sources, script = require_macos_sdk("11.3", sources, script; deployment_target="10.15")
+ 
+ platforms = supported_platforms()
+ 
+@@ -59,4 +74,4 @@
+ 
+ # Build the tarballs, and possibly a `build.jl` as well.
+ build_tarballs(ARGS, name, version, sources, script, platforms, products, dependencies;
+-               julia_compat="1.10")
++               julia_compat="1.10", preferred_gcc_version=v"9")
+--- a/L/LV2Host/build_tarballs.jl
++++ b/L/LV2Host/build_tarballs.jl
+@@ -1,6 +1,8 @@
+ # Note that this script can accept some limited command-line arguments, run
+ # `julia build_tarballs.jl --help` to see a usage message.
+ using BinaryBuilder
++
++include("../../platforms/macos_sdks.jl")
+ 
+ # The headless LV2 host from AudioPlugins.jl (https://github.com/SciML/AudioPlugins.jl):
+ # one C translation unit, `csrc/lv2_host.c`, exposing a C ABI of scalar doubles
+@@ -16,28 +18,44 @@
+ # Patch rather than minor: the fix adds no exported symbol and changes no
+ # signature, so `lv2_host.h` and the ABI are identical to 1.1.0's.
+ name = "LV2Host"
+-version = v"1.2.0"
++version = v"1.3.0"
+ 
+ # Collection of sources required to complete build
+ sources = [
+     GitSource("https://github.com/SciML/AudioPlugins.jl.git",
+-              "f48574da93f3fac9f3d612c16b60657043320c35"),  # SciML/AudioPlugins.jl main
++              ENV["AUDIOPLUGINS_LIVE_COMMIT"]), # Pin the reviewed, merged live-host source.
+ ]
+ 
+ # Bash recipe for building across all platforms
++# Source ABI is additive. Do not publish until the source PR is merged.
++# Require an explicit full commit hash instead of accidentally building a branch.
++@assert occursin(r"^[0-9a-f]{40}$", ENV["AUDIOPLUGINS_LIVE_COMMIT"])
+ script = raw"""
+ cd ${WORKSPACE}/srcdir/AudioPlugins.jl
+-install_license LICENSE csrc/vendor/LV2-ISC-LICENSE
++install_license LICENSE csrc/vendor/LV2-ISC-LICENSE csrc/vendor/CLAP-LICENSE csrc/vendor/miniaudio.LICENSE
++
++LIVE_LIBS="-pthread -lm"
++if [[ "${target}" == *-mingw* ]]; then
++    LIVE_LIBS="${LIVE_LIBS} -lavrt -lole32 -luuid -luser32 -lwinmm"
++elif [[ "${target}" == *-apple-* ]]; then
++    LIVE_LIBS="${LIVE_LIBS} -framework CoreFoundation -framework CoreAudio -framework AudioToolbox"
++else
++    LIVE_LIBS="${LIVE_LIBS} -ldl"
++fi
+ 
+ mkdir -p "${libdir}" "${includedir}"
+ # The host includes <lv2/...> through the include path so that it and lilv.h
+ # resolve to the same copy; lilv's own headers come from Lilv_jll.
+-${CC} -std=gnu99 -O2 -fPIC -shared -Wall -Wextra \
++${CC} -std=gnu11 -DAP_LIVE_WITH_DEVICE -O2 -fPIC -shared -Wall -Wextra \
+     -Icsrc/vendor -I"${includedir}/lilv-0" -I"${includedir}" \
+-    -o "${libdir}/liblv2_host.${dlext}" csrc/lv2_host.c \
+-    -L"${libdir}" -llilv-0 -lm
++    -o "${libdir}/liblv2_host.${dlext}" csrc/lv2_host.c csrc/lv2_live.c csrc/clap_live.c csrc/live_device.c \
++    -L"${libdir}" -llilv-0 ${LIVE_LIBS}
+ install -Dm644 csrc/lv2_host.h "${includedir}/lv2_host.h"
++install -Dm644 csrc/clap_live.h "${includedir}/clap_live.h"
++install -Dm644 csrc/live_device.h "${includedir}/live_device.h"
+ """
++
++sources, script = require_macos_sdk("11.3", sources, script; deployment_target="10.15")
+ 
+ platforms = supported_platforms()
+ 
+@@ -53,4 +71,4 @@
+ 
+ # Build the tarballs, and possibly a `build.jl` as well.
+ build_tarballs(ARGS, name, version, sources, script, platforms, products, dependencies;
+-               julia_compat="1.10")
++               julia_compat="1.10", preferred_gcc_version=v"9")
+--- a/V/VST3Host/build_tarballs.jl
++++ b/V/VST3Host/build_tarballs.jl
+@@ -13,19 +13,31 @@
+ # companion of CLAPHost and LV2Host; the version tracks the AudioPlugins.jl
+ # release whose `csrc/` is built.
+ name = "VST3Host"
+-version = v"1.2.0"
++version = v"1.3.0"
+ 
+ sources = [
+     GitSource("https://github.com/SciML/AudioPlugins.jl.git",
+-              "14de157d7edb617e58d15d674b4cc23fcd4d0935"),  # SciML/AudioPlugins.jl PR 5 "VST3 host: headless C++ shim" (merged with a merge commit; reachable from main)
++              ENV["AUDIOPLUGINS_LIVE_COMMIT"]), # Pin the reviewed, merged live-host source.
+ ]
+ 
++# Source ABI is additive. Do not publish until the source PR is merged.
++# Require an explicit full commit hash instead of accidentally building a branch.
++@assert occursin(r"^[0-9a-f]{40}$", ENV["AUDIOPLUGINS_LIVE_COMMIT"])
+ script = raw"""
+ cd ${WORKSPACE}/srcdir/AudioPlugins.jl
+-install_license LICENSE
++install_license LICENSE csrc/vendor/CLAP-LICENSE csrc/vendor/miniaudio.LICENSE
+ 
+ SDK=${includedir}/vst3sdk
+ SDKLIB=${prefix}/lib/vst3sdk
++LIVE_LIBS="-pthread -lm"
++if [[ "${target}" == *-mingw* ]]; then
++    LIVE_LIBS="${LIVE_LIBS} -lavrt -lole32 -luuid -luser32 -lwinmm"
++elif [[ "${target}" == *-apple-* ]]; then
++    LIVE_LIBS="${LIVE_LIBS} -framework CoreFoundation -framework CoreAudio -framework AudioToolbox"
++else
++    LIVE_LIBS="${LIVE_LIBS} -ldl"
++fi
++
+ mkdir -p "${libdir}"
+ 
+ HOSTING=${SDK}/public.sdk/source/vst/hosting
+@@ -41,12 +53,18 @@
+     EXTRA_LIBS="-ldl -lpthread"
+ fi
+ 
++${CC} -std=gnu11 -O2 -fPIC -fvisibility=hidden -DAP_LIVE_WITH_DEVICE \
++    -c csrc/clap_live.c -o clap_live.o
++${CC} -std=gnu11 -O2 -fPIC -fvisibility=hidden -DAP_LIVE_WITH_DEVICE \
++    -c csrc/live_device.c -o live_device.o
+ ${CXX} -std=c++17 -O2 -fPIC -shared -fvisibility=hidden -fvisibility-inlines-hidden \
+     ${EXTRA_FLAGS:-} -DRELEASE=1 -I"${SDK}" \
+     -o "${libdir}/libvst3_host.${dlext}" \
+-    csrc/vst3_host.cpp ${HOSTING}/plugprovider.cpp ${MODULE} \
+-    -L"${SDKLIB}" -lsdk_hosting -lsdk_common -lsdk -lbase -lpluginterfaces ${EXTRA_LIBS}
++    csrc/vst3_host.cpp csrc/vst3_live.cpp clap_live.o live_device.o ${HOSTING}/plugprovider.cpp ${MODULE} \
++    -L"${SDKLIB}" -lsdk_hosting -lsdk_common -lsdk -lbase -lpluginterfaces ${EXTRA_LIBS} ${LIVE_LIBS}
+ install -Dm644 csrc/vst3_host.h "${includedir}/vst3_host.h"
++install -Dm644 csrc/clap_live.h "${includedir}/clap_live.h"
++install -Dm644 csrc/live_device.h "${includedir}/live_device.h"
+ """
+ 
+ # Same SDK and deployment target as vst3sdk: the hosting sources use

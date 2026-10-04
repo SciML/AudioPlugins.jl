@@ -110,12 +110,28 @@ static clap_process_status CLAP_ABI process(const clap_plugin_t *p, const clap_p
             struct { LV2_Atom_Event event; uint8_t data[8]; } event;
             memset(&event, 0, sizeof(event));
             event.event.time.frames = e->time; event.event.body.type = s->midi;
-            event.event.body.size = (v->data[0] & 0xe0) == 0xc0 ? 2 : (v->data[0] >= 0xf8 ? 1 : 3);
+            uint8_t status = v->data[0];
+            event.event.body.size = (status >= 0xf8 || status == 0xf6) ? 1 :
+                ((status & 0xe0) == 0xc0 || status == 0xf1 || status == 0xf3) ? 2 : 3;
             memcpy(event.data, v->data, event.event.body.size);
             if (!lv2_atom_sequence_append_event(seq, ATOM_BYTES - sizeof(LV2_Atom), &event.event)) return CLAP_PROCESS_ERROR;
         }
     }
     lilv_instance_run(s->instance, frames);
+    if (s->atom_out >= 0 && out->type == s->sequence) {
+        if (out->size < sizeof(LV2_Atom_Sequence_Body) || out->size > ATOM_BYTES - sizeof(LV2_Atom)) return CLAP_PROCESS_ERROR;
+        uint32_t offset = sizeof(LV2_Atom_Sequence), end = sizeof(LV2_Atom) + out->size;
+        while (offset < end) {
+            if (end - offset < sizeof(LV2_Atom_Event)) return CLAP_PROCESS_ERROR;
+            LV2_Atom_Event *event = (LV2_Atom_Event *)(s->midi_out.bytes + offset);
+            if (event->body.size > end - offset - sizeof(*event)) return CLAP_PROCESS_ERROR;
+            uint32_t size = sizeof(*event) + lv2_atom_pad_size(event->body.size);
+            if (size > end - offset) return CLAP_PROCESS_ERROR;
+            clap_event_header_t dropped = {0};
+            pr->out_events->try_push(pr->out_events, &dropped);
+            offset += size;
+        }
+    }
     for (uint32_t ch = 0; ch < s->noutputs; ++ch)
         memcpy(pr->audio_outputs[0].data32[ch], s->audio + (s->ninputs + ch) * frames, frames * sizeof(float));
     return CLAP_PROCESS_CONTINUE;
@@ -155,6 +171,8 @@ static const void *CLAP_ABI extension(const clap_plugin_t *p, const char *id) {
 static void CLAP_ABI callback(const clap_plugin_t *p) { (void)p; }
 static const clap_plugin_t *create(const clap_host_t *h, const char *path, const char *id, const ap_live_config *c) {
     lv2_live *s = calloc(1, sizeof(*s)); if (!s) return NULL;
+    volatile unsigned char *memory = (volatile unsigned char *)s;
+    for (size_t i = 0; i < sizeof(*s); i += 4096) memory[i] = memory[i];
     s->api = (clap_plugin_t){.plugin_data = s, .init = init, .destroy = destroy,
         .activate = activate, .deactivate = deactivate, .start_processing = start,
         .stop_processing = stop, .process = process, .get_extension = extension, .on_main_thread = callback};
@@ -232,8 +250,6 @@ static const clap_plugin_t *create(const clap_host_t *h, const char *path, const
     if (s->atom_in >= 0) lilv_instance_connect_port(s->instance, (uint32_t)s->atom_in, s->midi_in.bytes);
     if (s->atom_out >= 0) lilv_instance_connect_port(s->instance, (uint32_t)s->atom_out, s->midi_out.bytes);
     if (s->latency_port >= (int)s->nports) goto fail;
-    volatile unsigned char *memory = (volatile unsigned char *)s;
-    for (size_t i = 0; i < sizeof(*s); i += 4096) memory[i] = memory[i];
     return &s->api;
 fail:
     destroy(&s->api); return NULL;

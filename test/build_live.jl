@@ -26,6 +26,10 @@ function build_live(dir)
         ["-ldl", "-lm"]
     end
     module_file = Sys.iswindows() ? "module_win32.cpp" : Sys.isapple() ? "module_mac.mm" : "module_linux.cpp"
+    # Build the SDK conversion helper with this compiler. New MinGW releases
+    # changed mbstate_t, so its prebuilt codecvt object is not ABI-compatible.
+    conversion = joinpath(sdk, "public.sdk", "source", "vst", "utility", "stringconvert.cpp")
+    common_conversion = joinpath(sdk, "public.sdk", "source", "common", "commonstringconvert.cpp")
     module_object = joinpath(dir, "module.o")
     module_flags = Sys.isapple() ? ["-fobjc-arc"] : String[]
     run(`$cxx $arch -std=c++17 -O2 -fPIC -DRELEASE=1 -I$sdk $module_flags
@@ -33,7 +37,7 @@ function build_live(dir)
     push!(objects, module_object)
     library = joinpath(dir, "libaudioplugins_live." * Libdl.dlext)
     run(`$cxx $arch -std=c++17 -O2 -fPIC -shared -DRELEASE=1 -I$sdk
-         $root/csrc/vst3_live.cpp $hosting/plugprovider.cpp $objects
+         $root/csrc/vst3_live.cpp $hosting/plugprovider.cpp $conversion $common_conversion $objects
          $(lilv.liblilv_path) -L$sdklib -lsdk_hosting -lsdk_common -lsdk -lbase -lpluginterfaces
          -pthread $platform -o $library`)
     return library, (sdk, sdklib)

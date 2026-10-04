@@ -43,7 +43,9 @@ if(AP_LIVE_VST3)
   else()
     set(MODULE ${HOSTING}/module_linux.cpp)
   endif()
-  target_sources(audioplugins_live PRIVATE vst3_live.cpp ${HOSTING}/plugprovider.cpp ${MODULE})
+  target_sources(audioplugins_live PRIVATE vst3_live.cpp ${HOSTING}/plugprovider.cpp
+    ${VST3_SDK_ROOT}/public.sdk/source/vst/utility/stringconvert.cpp
+    ${VST3_SDK_ROOT}/public.sdk/source/common/commonstringconvert.cpp ${MODULE})
   target_include_directories(audioplugins_live PRIVATE ${VST3_SDK_ROOT})
   target_compile_definitions(audioplugins_live PRIVATE RELEASE=1)
   foreach(NAME sdk_hosting sdk_common sdk base pluginterfaces)

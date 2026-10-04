@@ -3,6 +3,13 @@
 #ifndef AP_CLAP_LIVE_H
 #define AP_CLAP_LIVE_H
 #include <stdint.h>
+#if defined(_WIN32)
+#define AP_LIVE_API __declspec(dllexport)
+#elif defined(__GNUC__)
+#define AP_LIVE_API __attribute__((visibility("default")))
+#else
+#define AP_LIVE_API
+#endif
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,8 +26,8 @@ enum { AP_LIVE_PARAM = 0, AP_LIVE_MIDI = 1 };
 typedef struct {
     double sample_rate;
     uint32_t block_size, channels, queue_blocks;
-    uint32_t driver;             /* TIMER: native thread; DEVICE: native caller */
-    uint32_t priority;           /* 0: normal, 1: best effort FIFO, 2: strict FIFO */
+    uint32_t driver;             /* TIMER=clock, DEVICE=external caller, HARDWARE=built-in device */
+    uint32_t priority;           /* 0: normal, 1: best effort native priority, 2: strict */
 } ap_live_config;
 
 /* Events are ordered by frame within their accompanying block. Parameter values
@@ -38,23 +45,27 @@ typedef struct {
     int32_t error;
 } ap_live_stats;
 
-uint32_t ap_live_abi_version(void);
+AP_LIVE_API uint32_t ap_live_abi_version(void);
 /* All control and queue operations must run on the OS thread that opens the
  * session. Use a stable main/control thread, never a migratable Julia task.
  * Calls on different sessions are allowed. Plugin entry init/deinit and offline
  * module operations must be serialized on this same thread. */
-int ap_live_open(const char *binary, const char *id, const ap_live_config *, ap_live **);
-int ap_live_start(ap_live *);
+AP_LIVE_API int ap_live_open(const char *binary, const char *id, const ap_live_config *, ap_live **);
+/* Optional format adapters; detect symbol availability before use. LV2 path
+ * is a search path with specification bundles; VST3 path is a plugin bundle. */
+AP_LIVE_API int ap_live_open_lv2(const char *, const char *, const ap_live_config *, ap_live **);
+AP_LIVE_API int ap_live_open_vst3(const char *, const char *, const ap_live_config *, ap_live **);
+AP_LIVE_API int ap_live_start(ap_live *);
 /* TIMER: join, deactivate. DEVICE: request stop and return AGAIN until the
  * native device owner has called device_end and quiesced its callbacks. */
-int ap_live_stop(ap_live *);
+AP_LIVE_API int ap_live_stop(ap_live *);
 /* Does not implicitly stop: refuses a running/unjoined session. On success the
  * pointer is invalid; caller must exclude all concurrent/future accesses. */
-int ap_live_close(ap_live *);
+AP_LIVE_API int ap_live_close(ap_live *);
 /* Services one coalesced main-thread callback. A restart request stops TIMER
  * sessions; DEVICE sessions first need device_end. Returns STOPPED after
  * deactivation; reopen to renegotiate ports/parameters before restarting. */
-int ap_live_poll(ap_live *);
+AP_LIVE_API int ap_live_poll(ap_live *);
 
 /* Nonblocking copies of exactly block_size * channels interleaved floats.
  * Queue full/empty returns AGAIN. No pointer is retained. Input sequence is an
@@ -62,17 +73,17 @@ int ap_live_poll(ap_live *);
  * UINT64_MAX input sequence in an output means silence due to missing input.
  * Producer and consumer are the control thread; no concurrent queue callers.
  * A stop/start discards queued audio and preserves plugin parameters. */
-int ap_live_try_write(ap_live *, const float *, const ap_live_event *, uint32_t n,
+AP_LIVE_API int ap_live_try_write(ap_live *, const float *, const ap_live_event *, uint32_t n,
                       uint64_t input_sequence);
-int ap_live_try_read(ap_live *, float *, uint64_t *tick, uint64_t *input_sequence);
+AP_LIVE_API int ap_live_try_read(ap_live *, float *, uint64_t *tick, uint64_t *input_sequence);
 /* Independent atomic counters, not a transactionally consistent snapshot.
  * Counters wrap modulo 2^32; tick and input_sequence are 64-bit ring payloads. */
-int ap_live_get_stats(const ap_live *, ap_live_stats *);
+AP_LIVE_API int ap_live_get_stats(const ap_live *, ap_live_stats *);
 /* Optional additive ABI v1 capability. Control thread only, after successful
  * start and before stop. Returns plugin latency in frames, cached immediately
- * after activation (zero without clap.latency). Excludes queue/device latency;
+ * after activation, or after each LV2 block (zero if unavailable). Excludes queue/device latency;
  * no plugin method is called here and no compensation is performed. */
-int ap_live_get_latency(const ap_live *, uint32_t *frames);
+AP_LIVE_API int ap_live_get_latency(const ap_live *, uint32_t *frames);
 
 /* Native device backend contract (never call these from Julia): start arms the
  * session on control; begin/process/end run on one stable native audio thread.
@@ -81,10 +92,10 @@ int ap_live_get_latency(const ap_live *, uint32_t *frames);
  * Call end even after process returns STOPPED/error, then quiesce callbacks
  * before control calls stop/close. A concurrent/wrong-thread call is rejected.
  * Capture routing and variable device block sizes belong to the device adapter.
- * No device dependency, device discovery, or resampler is supplied by this ABI. */
-int ap_live_device_begin(ap_live *);
-int ap_live_device_process(ap_live *, float *device_output);
-int ap_live_device_end(ap_live *);
+ * Built-in capture/playback instead uses HARDWARE and live_device.h. */
+AP_LIVE_API int ap_live_device_begin(ap_live *);
+AP_LIVE_API int ap_live_device_process(ap_live *, float *device_output);
+AP_LIVE_API int ap_live_device_end(ap_live *);
 #ifdef __cplusplus
 }
 #endif

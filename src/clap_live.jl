@@ -86,7 +86,7 @@ Whether `library` supplies experimental live ABI version 1 for `format`. Returns
 false with the currently released JLL. No new JLL version is required to load
 AudioPlugins; pass a source-built native live library to opt in.
 """
-function live_available(; library::AbstractString = CLAP_LIB, format::Symbol = :clap)
+function live_available(; format::Symbol = :clap, library::AbstractString = _live_library(format))
     format in (:clap, :lv2, :vst3) || return false
     lib = dlopen(library; throw_error = false)
     lib === nothing && return false
@@ -103,6 +103,7 @@ end
 
 "Generic name for a native live session; `ClapLiveSession` remains a compatibility alias."
 const LiveSession = ClapLiveSession
+_live_library(format) = format == :lv2 ? LV2_LIB : format == :vst3 ? VST3_LIB : CLAP_LIB
 _live_open_symbol(format) = format == :clap ? :ap_live_open : Symbol("ap_live_open_", format)
 
 function _live_result(result::Integer)
@@ -171,10 +172,10 @@ is realtime-safe; Julia-authored plugins with a Julia runtime are unsuitable.
 """
 function open_live(
         path::AbstractString; plugin_id::AbstractString = "",
-        library::AbstractString = CLAP_LIB, sample_rate::Real = 48000,
+        format::Symbol = :clap, library::AbstractString = _live_library(format), sample_rate::Real = 48000,
         block_size::Integer = 512, channels::Integer = 2,
         queue_blocks::Integer = 8, priority::Symbol = :normal,
-        format::Symbol = :clap, driver::Symbol = :timer, backend::Symbol = :default,
+        driver::Symbol = :timer, backend::Symbol = :default,
         capture::Bool = false, playback_device::Integer = -1, capture_device::Integer = -1
     )
     _live_control()

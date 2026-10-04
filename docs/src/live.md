@@ -184,3 +184,12 @@ backend. After the source merges, pin the Yggdrasil host recipes to that commit,
 build and register the JLLs, then raise compatibility floors and make live mode
 available from those artifacts. The source PR does not publish a v2 release or
 claim completion of hardware validation.
+
+The prepared recipe update is `contrib/yggdrasil/live-hosts.patch`. From a clean
+Yggdrasil checkout, apply it with `git apply --check` followed by `git apply`.
+Set `AUDIOPLUGINS_LIVE_COMMIT` to the full merged AudioPlugins source commit
+before building each recipe. The proposed JLL versions are 1.3.0; the patch adds
+live symbols to each existing host library, installs the public headers, retains
+the offline ABI, and includes the miniaudio licence. It deliberately requires
+an explicit commit instead of shipping a moving branch. BinaryBuilder builds
+and artifact registration must precede a Julia compatibility-floor change.

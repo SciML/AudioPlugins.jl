@@ -30,7 +30,7 @@ struct ap_audio_device {
     ap_live_config config;
     device_ring capture_ring, playback_ring;
     float *staging, *worker_capture, *playback;
-    uint32_t offset;
+    uint32_t offset, device_period, device_rate;
     uint64_t clock;
     int capture, context_ready, device_ready, semaphore_ready;
     _Atomic uint32_t closing, lost, underruns, overruns;
@@ -41,6 +41,10 @@ struct ap_audio_device {
     os_workgroup_join_token_s workgroup_token;
 #endif
 };
+static void pretouch(void *memory, size_t bytes) {
+    volatile unsigned char *p = memory;
+    for (size_t i = 0; i < bytes; i += 4096) p[i] = p[i];
+}
 static int backend_context(const char *name, ma_context *context) {
     ma_backend backend;
     if (!name || !strcmp(name, "default")) {
@@ -150,7 +154,8 @@ static int ring_init(device_ring *r, const ap_live_config *c) {
     size_t samples = (size_t)c->queue_blocks * c->block_size * c->channels;
     r->samples = calloc(samples, sizeof(float)); r->sequences = calloc(c->queue_blocks, sizeof(uint64_t));
     if (!r->samples || !r->sequences) return 0;
-    volatile float *p = r->samples; for (size_t i = 0; i < samples; i += 1024) p[i] = 0;
+    pretouch(r->samples, samples * sizeof(float));
+    pretouch(r->sequences, c->queue_blocks * sizeof(uint64_t));
     return 1;
 }
 void ap_audio_close(ap_audio_device *d) {
@@ -168,6 +173,7 @@ void ap_audio_close(ap_audio_device *d) {
 }
 ap_audio_device *ap_audio_open(const ap_live_config *c, const char *backend, int capture, int playback_index, int capture_index) {
     ap_audio_device *d = calloc(1, sizeof(*d)); if (!d) return NULL;
+    pretouch(d, sizeof(*d));
     d->config = *c; d->capture = !!capture;
     atomic_init(&d->workgroup_joined, 0);
     atomic_init(&d->closing, 0); atomic_init(&d->lost, 0);
@@ -177,6 +183,9 @@ ap_audio_device *ap_audio_open(const ap_live_config *c, const char *backend, int
     d->staging = calloc(samples, sizeof(float)); d->worker_capture = calloc(samples, sizeof(float));
     d->playback = calloc(samples, sizeof(float));
     if (!d->staging || !d->worker_capture || !d->playback) goto fail;
+    pretouch(d->staging, samples * sizeof(float));
+    pretouch(d->worker_capture, samples * sizeof(float));
+    pretouch(d->playback, samples * sizeof(float));
     if (ma_semaphore_init(0, &d->wake) != MA_SUCCESS) goto fail;
     d->semaphore_ready = 1;
     if (!backend_context(backend, &d->context)) goto fail;
@@ -194,6 +203,8 @@ ap_audio_device *ap_audio_open(const ap_live_config *c, const char *backend, int
     }
     if (ma_device_init(&d->context, &config, &d->device) != MA_SUCCESS) goto fail;
     d->device_ready = 1;
+    d->device_period = d->device.playback.internalPeriodSizeInFrames;
+    d->device_rate = d->device.playback.internalSampleRate;
 #ifdef AP_WORKGROUP
     if (__builtin_available(macOS 11.0, *)) {
         if (d->context.backend == ma_backend_coreaudio) {
@@ -209,14 +220,17 @@ ap_audio_device *ap_audio_open(const ap_live_config *c, const char *backend, int
 fail:
     ap_audio_close(d); return NULL;
 }
-void ap_audio_prepare(ap_audio_device *d) {
+int ap_audio_prepare(ap_audio_device *d) {
     /* Called only with device stopped and processing worker joined. */
-    ma_semaphore_uninit(&d->wake);
-    ma_semaphore_init(0, &d->wake);
+    if (d->semaphore_ready) ma_semaphore_uninit(&d->wake);
+    d->semaphore_ready = 0;
+    if (ma_semaphore_init(0, &d->wake) != MA_SUCCESS) return AP_LIVE_STATE;
+    d->semaphore_ready = 1;
     d->offset = 0; d->clock = 0;
     atomic_store(&d->capture_ring.read, 0); atomic_store(&d->capture_ring.write, 0);
     atomic_store(&d->playback_ring.read, 0); atomic_store(&d->playback_ring.write, 0);
     atomic_store(&d->closing, 0); atomic_store(&d->lost, 0);
+    return AP_LIVE_OK;
 }
 int ap_audio_start(ap_audio_device *d) {
     return ma_device_start(&d->device) == MA_SUCCESS ? AP_LIVE_OK : AP_LIVE_STATE;
@@ -262,8 +276,8 @@ void ap_audio_stats(ap_audio_device *d, ap_device_stats *s) {
     s->underruns = atomic_load(&d->underruns); s->overruns = atomic_load(&d->overruns); s->lost = atomic_load(&d->lost);
     s->workgroup_joined = atomic_load(&d->workgroup_joined);
     s->buffering_frames = 2 * d->config.block_size; s->capture = d->capture;
-    s->device_period_frames = d->device.playback.internalPeriodSizeInFrames;
-    s->device_sample_rate = d->device.playback.internalSampleRate; s->backend = d->context.backend;
+    s->device_period_frames = d->device_period;
+    s->device_sample_rate = d->device_rate; s->backend = d->context.backend;
 }
 
 int ap_audio_enter(ap_audio_device *d) {

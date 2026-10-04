@@ -208,7 +208,10 @@ static const void *CLAP_ABI extension(const clap_plugin_t *, const char *id) {
 static void CLAP_ABI callback(const clap_plugin_t *) {}
 static const clap_plugin_t *create(const clap_host_t *host, const char *path, const char *id, const ap_live_config *config) {
     try {
-        auto s = std::make_unique<State>(); s->host = host; s->config = *config;
+        auto s = std::make_unique<State>();
+        volatile unsigned char *memory = reinterpret_cast<volatile unsigned char *>(s.get());
+        for (size_t i = 0; i < sizeof(State); i += 4096) memory[i] = memory[i];
+        s->host = host; s->config = *config;
         s->context.host = s->handler.host = host;
         std::string error;
         s->module = VST3::Hosting::Module::create(path, error); if (!s->module) return nullptr;
@@ -246,8 +249,6 @@ static const clap_plugin_t *create(const clap_host_t *host, const char *path, co
             }
         }
         s->api = {nullptr, s.get(), init, destroy, activate, deactivate, start, stop, nullptr, process, extension, callback};
-        volatile unsigned char *memory = reinterpret_cast<volatile unsigned char *>(s.get());
-        for (size_t i = 0; i < sizeof(State); i += 4096) memory[i] = memory[i];
         auto result = &s->api; s.release(); return result;
     } catch (...) { return nullptr; }
 }

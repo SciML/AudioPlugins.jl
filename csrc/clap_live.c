@@ -174,6 +174,7 @@ int ap_live_open_adapter(const char *path, const char *id, const ap_live_config 
 #endif
     ap_live *s = calloc(1, sizeof(*s));
     if (!s) return AP_LIVE_INVALID;
+    touch_pages(s, sizeof(*s));
     s->config = *c;
     s->control = ap_thread_self();
     if (ap_control_setup(&s->control_owned)) { free(s); return AP_LIVE_UNSUPPORTED; }
@@ -256,7 +257,6 @@ int ap_live_open_adapter(const char *path, const char *id, const ap_live_config 
     }
     s->in_buffer.data32 = s->in_ptr; s->in_buffer.channel_count = c->channels;
     s->out_buffer.data32 = s->out_ptr; s->out_buffer.channel_count = c->channels;
-    touch_pages(s, sizeof(*s));
     *result = s;
     return AP_LIVE_OK;
 unsupported:
@@ -291,8 +291,17 @@ int ap_live_try_write(ap_live *s, const float *samples, const ap_live_event *eve
                 e->value < p->min_value || e->value > p->max_value ||
                 ((p->flags & CLAP_PARAM_IS_STEPPED) && trunc(e->value) != e->value))
                 return AP_LIVE_INVALID;
-        } else if (e->type != AP_LIVE_MIDI || !s->midi_input ||
-            (s->notes_only && (e->midi[0] & 0xf0) != 0x80 && (e->midi[0] & 0xf0) != 0x90)) return AP_LIVE_UNSUPPORTED;
+        } else if (e->type == AP_LIVE_MIDI) {
+            uint8_t status = e->midi[0];
+            if (status < 0x80 || status == 0xf4 || status == 0xf5 || status == 0xf9 || status == 0xfd)
+                return AP_LIVE_INVALID;
+            if (status == 0xf0 || status == 0xf7) return AP_LIVE_UNSUPPORTED;
+            int length = (status >= 0xf8 || status == 0xf6) ? 1 :
+                ((status & 0xe0) == 0xc0 || status == 0xf1 || status == 0xf3) ? 2 : 3;
+            for (int byte = 1; byte < length; ++byte) if (e->midi[byte] >= 0x80) return AP_LIVE_INVALID;
+            if (!s->midi_input || (s->notes_only && (status & 0xf0) != 0x80 && (status & 0xf0) != 0x90))
+                return AP_LIVE_UNSUPPORTED;
+        } else return AP_LIVE_UNSUPPORTED;
     }
     uint32_t w = atomic_load_explicit(&s->input.write, memory_order_relaxed);
     uint32_t r = atomic_load_explicit(&s->input.read, memory_order_acquire);
@@ -518,7 +527,7 @@ int ap_live_start(ap_live *s) {
         atomic_load(&s->restart)) return AP_LIVE_STATE;
 #ifdef AP_LIVE_WITH_DEVICE
     if (s->config.driver == AP_LIVE_HARDWARE && !s->device) return AP_LIVE_STATE;
-    if (s->device) ap_audio_prepare(s->device);
+    if (s->device && ap_audio_prepare(s->device)) return AP_LIVE_STATE;
 #endif
     atomic_store(&s->stop, 0); atomic_store(&s->ready, 0); atomic_store(&s->error, 0);
     if (!s->plugin->activate(s->plugin, s->config.sample_rate, s->config.block_size, s->config.block_size))

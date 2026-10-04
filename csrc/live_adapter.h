@@ -10,8 +10,6 @@ extern "C" {
 #endif
 typedef const clap_plugin_t *(*ap_adapter_create)(const clap_host_t *, const char *, const char *, const ap_live_config *);
 int ap_live_open_adapter(const char *, const char *, const ap_live_config *, ap_live **, ap_adapter_create);
-int ap_live_open_lv2(const char *, const char *, const ap_live_config *, ap_live **);
-int ap_live_open_vst3(const char *, const char *, const ap_live_config *, ap_live **);
 #ifdef __cplusplus
 }
 #endif
