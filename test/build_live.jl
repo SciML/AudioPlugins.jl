@@ -1,25 +1,40 @@
-# Source-only build used by the live tests. JLLs supply build dependencies; no
-# installed host is replaced and the SDK remains a test-only dependency.
+# Source-only build using the same compilers as the offline fixture tests.
+# JLLs supply build dependencies; installed host libraries are never replaced.
 using vst3sdk_jll
 function build_live(dir)
+    mkpath(dir)
     root = dirname(@__DIR__)
     lilv = AudioPlugins.LV2Host_jll.Lilv_jll
     sdk = joinpath(vst3sdk_jll.artifact_dir, "include", "vst3sdk")
     sdklib = joinpath(vst3sdk_jll.artifact_dir, "lib", "vst3sdk")
     cc, cxx = AudioPlugins._c_compiler(), AudioPlugins._cxx_compiler()
-    generator = Sys.iswindows() ? ["-G", "MinGW Makefiles"] : String[]
-    flags = join(AudioPlugins._c_arch_flags(), " ")
-    run(`cmake -S $root/csrc -B $dir $generator -DCMAKE_BUILD_TYPE=Release
-         -DCMAKE_C_COMPILER=$cc -DCMAKE_CXX_COMPILER=$cxx
-         -DCMAKE_C_FLAGS=$flags -DCMAKE_CXX_FLAGS=$flags
-         -DLILV_INCLUDE_DIR=$(joinpath(lilv.artifact_dir, "include", "lilv-0"))
-         -DLILV_LIBRARY=$(lilv.liblilv_path)
-         -DVST3_SDK_ROOT=$sdk -DVST3_SDK_LIBDIR=$sdklib`)
-    run(`cmake --build $dir --parallel 2`)
-    library = joinpath(dir, (Sys.iswindows() ? "" : "lib") * "audioplugins_live." * Libdl.dlext)
-    # MinGW normally prefixes shared libraries with lib as well.
-    if Sys.iswindows() && !isfile(library)
-        library = joinpath(dir, "libaudioplugins_live.dll")
+    arch = AudioPlugins._c_arch_flags()
+    objects = String[]
+    for name in ("clap_live", "live_device", "lv2_live")
+        object = joinpath(dir, name * ".o")
+        run(`$cc $arch -std=c11 -O2 -fPIC -DAP_LIVE_WITH_DEVICE -I$root/csrc/vendor
+             -I$(joinpath(lilv.artifact_dir, "include", "lilv-0"))
+             -c $root/csrc/$name.c -o $object`)
+        push!(objects, object)
     end
+    hosting = joinpath(sdk, "public.sdk", "source", "vst", "hosting")
+    platform = if Sys.iswindows()
+        ["-lavrt", "-lole32", "-luuid", "-luser32", "-lwinmm", "-lshlwapi", "-lshell32", "-Wl,--export-all-symbols"]
+    elseif Sys.isapple()
+        ["-framework", "CoreFoundation", "-framework", "CoreAudio", "-framework", "AudioToolbox", "-framework", "Cocoa"]
+    else
+        ["-ldl", "-lm"]
+    end
+    module_file = Sys.iswindows() ? "module_win32.cpp" : Sys.isapple() ? "module_mac.mm" : "module_linux.cpp"
+    module_object = joinpath(dir, "module.o")
+    module_flags = Sys.isapple() ? ["-fobjc-arc"] : String[]
+    run(`$cxx $arch -std=c++17 -O2 -fPIC -DRELEASE=1 -I$sdk $module_flags
+         -c $hosting/$module_file -o $module_object`)
+    push!(objects, module_object)
+    library = joinpath(dir, "libaudioplugins_live." * Libdl.dlext)
+    run(`$cxx $arch -std=c++17 -O2 -fPIC -shared -DRELEASE=1 -I$sdk
+         $root/csrc/vst3_live.cpp $hosting/plugprovider.cpp $objects
+         $(lilv.liblilv_path) -L$sdklib -lsdk_hosting -lsdk_common -lsdk -lbase -lpluginterfaces
+         -pthread $platform -o $library`)
     return library, (sdk, sdklib)
 end

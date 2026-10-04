@@ -198,7 +198,7 @@ ap_audio_device *ap_audio_open(const ap_live_config *c, const char *backend, int
     if (__builtin_available(macOS 11.0, *)) {
         if (d->context.backend == ma_backend_coreaudio) {
             AudioObjectPropertyAddress address = {kAudioDevicePropertyIOThreadOSWorkgroup,
-                kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain};
+                kAudioObjectPropertyScopeGlobal, 0};
             UInt32 size = sizeof(d->workgroup);
             if (AudioObjectGetPropertyData(d->device.coreaudio.deviceObjectIDPlayback,
                 &address, 0, NULL, &size, &d->workgroup) != noErr) d->workgroup = NULL;
@@ -288,3 +288,10 @@ void ap_audio_leave(ap_audio_device *d) {
     (void)d;
 #endif
 }
+
+#ifdef AP_LIVE_TEST
+void ap_audio_test_loss(ap_audio_device *d) {
+    ma_device_notification event = {0}; event.pDevice = &d->device;
+    event.type = ma_device_notification_type_stopped; notification(&event);
+}
+#endif

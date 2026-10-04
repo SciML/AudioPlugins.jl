@@ -2,6 +2,7 @@
 #ifndef AP_LIVE_PLATFORM_H
 #define AP_LIVE_PLATFORM_H
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #ifdef _WIN32

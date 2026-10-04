@@ -20,7 +20,7 @@ typedef struct {
     LilvWorld *world;
     const LilvPlugin *descriptor;
     LilvInstance *instance;
-    uint32_t nports, nparams, nin, nout, input[2], output[2], params[PORTS];
+    uint32_t nports, nparams, ninputs, noutputs, input[2], output[2], params[PORTS];
     clap_param_info_t info[PORTS];
     float control[PORTS];
     float *audio;
@@ -92,7 +92,7 @@ static uint32_t CLAP_ABI latency(const clap_plugin_t *p) {
 static clap_process_status CLAP_ABI process(const clap_plugin_t *p, const clap_process_t *pr) {
     lv2_live *s = p->plugin_data;
     uint32_t frames = s->config.block_size;
-    for (uint32_t ch = 0; ch < s->nin; ++ch)
+    for (uint32_t ch = 0; ch < s->ninputs; ++ch)
         memcpy(s->audio + ch * frames, pr->audio_inputs[0].data32[ch], frames * sizeof(float));
     LV2_Atom_Sequence *seq = (LV2_Atom_Sequence *)s->midi_in.bytes;
     seq->atom.type = s->sequence; seq->atom.size = sizeof(seq->body);
@@ -116,15 +116,15 @@ static clap_process_status CLAP_ABI process(const clap_plugin_t *p, const clap_p
         }
     }
     lilv_instance_run(s->instance, frames);
-    for (uint32_t ch = 0; ch < s->nout; ++ch)
-        memcpy(pr->audio_outputs[0].data32[ch], s->audio + (s->nin + ch) * frames, frames * sizeof(float));
+    for (uint32_t ch = 0; ch < s->noutputs; ++ch)
+        memcpy(pr->audio_outputs[0].data32[ch], s->audio + (s->ninputs + ch) * frames, frames * sizeof(float));
     return CLAP_PROCESS_CONTINUE;
 }
 static uint32_t CLAP_ABI port_count(const clap_plugin_t *p, bool in) { (void)p; (void)in; return 1; }
 static bool CLAP_ABI port_info(const clap_plugin_t *p, uint32_t i, bool in, clap_audio_port_info_t *info) {
     lv2_live *s = p->plugin_data; if (i) return false;
     memset(info, 0, sizeof(*info)); info->flags = CLAP_AUDIO_PORT_IS_MAIN;
-    info->channel_count = in ? s->nin : s->nout; return true;
+    info->channel_count = in ? s->ninputs : s->noutputs; return true;
 }
 static uint32_t CLAP_ABI param_count(const clap_plugin_t *p) { return ((lv2_live *)p->plugin_data)->nparams; }
 static bool CLAP_ABI param_info(const clap_plugin_t *p, uint32_t i, clap_param_info_t *info) {
@@ -191,8 +191,8 @@ static const clap_plugin_t *create(const clap_host_t *h, const char *path, const
         if (input == is_port(s, port, LV2_CORE__OutputPort)) goto fail;
         if (property(s, port, LV2_CORE_PREFIX "isSideChain")) goto fail;
         if (is_port(s, port, LV2_CORE__AudioPort)) {
-            if (input) { if (s->nin == c->channels) goto fail; s->input[s->nin++] = i; }
-            else { if (s->nout == c->channels) goto fail; s->output[s->nout++] = i; }
+            if (input) { if (s->ninputs == c->channels) goto fail; s->input[s->ninputs++] = i; }
+            else { if (s->noutputs == c->channels) goto fail; s->output[s->noutputs++] = i; }
         } else if (is_port(s, port, LV2_CORE__ControlPort)) {
             float scale = property(s, port, LV2_CORE__sampleRate) ? (float)c->sample_rate : 1;
             s->control[i] = isfinite(defaults[i]) ? defaults[i] * scale : 0;
@@ -221,14 +221,14 @@ static const clap_plugin_t *create(const clap_host_t *h, const char *path, const
             lilv_node_free(midi);
         } else goto fail;
     }
-    if (s->nin != c->channels || s->nout != c->channels) goto fail;
+    if (s->ninputs != c->channels || s->noutputs != c->channels) goto fail;
     if (lilv_plugin_has_latency(s->descriptor)) s->latency_port = (int)lilv_plugin_get_latency_port_index(s->descriptor);
-    s->audio = calloc((size_t)(s->nin + s->nout) * c->block_size, sizeof(float)); if (!s->audio) goto fail;
+    s->audio = calloc((size_t)(s->ninputs + s->noutputs) * c->block_size, sizeof(float)); if (!s->audio) goto fail;
     s->sequence = map_uri(s, LV2_ATOM__Sequence); s->midi = map_uri(s, LV2_MIDI__MidiEvent); s->chunk = map_uri(s, LV2_ATOM__Chunk);
     s->instance = lilv_plugin_instantiate(s->descriptor, c->sample_rate, s->feature_ptrs); if (!s->instance) goto fail;
     for (uint32_t i = 0; i < s->nports; ++i) lilv_instance_connect_port(s->instance, i, &s->control[i]);
-    for (uint32_t i = 0; i < s->nin; ++i) lilv_instance_connect_port(s->instance, s->input[i], s->audio + i * c->block_size);
-    for (uint32_t i = 0; i < s->nout; ++i) lilv_instance_connect_port(s->instance, s->output[i], s->audio + (s->nin + i) * c->block_size);
+    for (uint32_t i = 0; i < s->ninputs; ++i) lilv_instance_connect_port(s->instance, s->input[i], s->audio + i * c->block_size);
+    for (uint32_t i = 0; i < s->noutputs; ++i) lilv_instance_connect_port(s->instance, s->output[i], s->audio + (s->ninputs + i) * c->block_size);
     if (s->atom_in >= 0) lilv_instance_connect_port(s->instance, (uint32_t)s->atom_in, s->midi_in.bytes);
     if (s->atom_out >= 0) lilv_instance_connect_port(s->instance, (uint32_t)s->atom_out, s->midi_out.bytes);
     if (s->latency_port >= (int)s->nports) goto fail;

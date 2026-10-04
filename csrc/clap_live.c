@@ -500,6 +500,7 @@ static void *hardware_main(void *arg) {
         if (result) {
             if (result != AP_LIVE_STOPPED) {
                 atomic_store(&s->error, result);
+                atomic_store(&s->restart, 1);
                 atomic_store(&s->stop, 1);
             }
             break;
@@ -611,6 +612,12 @@ int ap_live_get_latency(const ap_live *s, uint32_t *frames) {
     return AP_LIVE_OK;
 }
 #ifdef AP_LIVE_TEST
+#ifdef AP_LIVE_WITH_DEVICE
+void ap_live_test_device_loss(ap_live *s) {
+    extern void ap_audio_test_loss(ap_audio_device *);
+    ap_audio_test_loss(s->device);
+}
+#endif
 /* Force unsigned index rollover in the source probe without billions of ticks. */
 void ap_live_test_seed(ap_live *s, uint32_t index) {
     atomic_store(&s->input.read, index); atomic_store(&s->input.write, index);
