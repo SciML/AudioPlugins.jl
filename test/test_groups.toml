@@ -71,3 +71,8 @@ os = ["ubuntu-latest", "macos-latest", "windows-latest"]
 [CLAPLive]
 versions = ["lts", "1"]
 os = ["ubuntu-latest", "macos-latest", "windows-latest"]
+
+# Full native live engine, format adapters, and null audio device.
+[Live]
+versions = ["lts", "1"]
+os = ["ubuntu-latest", "macos-latest", "windows-latest"]

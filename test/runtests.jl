@@ -8,6 +8,7 @@ run_tests(;
     core = joinpath(@__DIR__, "clap_host_tests.jl"),
     groups = Dict(
         "CLAPInstances" => joinpath(@__DIR__, "clap_instances_tests.jl"),
+        "Live" => joinpath(@__DIR__, "live_tests.jl"),
         "CLAPLive" => joinpath(@__DIR__, "clap_live_tests.jl"),
         "Bundles" => joinpath(@__DIR__, "bundle_tests.jl"),
         "Export" => joinpath(@__DIR__, "export_tests.jl"),

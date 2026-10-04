@@ -1,15 +1,15 @@
 #define _POSIX_C_SOURCE 200809L
 #include "../csrc/clap_live.h"
 #include <assert.h>
-#include <dlfcn.h>
+#include "../csrc/live_platform.h"
 #include <math.h>
-#include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
 static _Thread_local int audio_alloc_guard;
+#ifndef AP_LIVE_NO_ALLOC_WRAP
 void *__real_malloc(size_t n);
 void *__real_calloc(size_t n, size_t m);
 void *__real_realloc(void *p, size_t n);
@@ -18,17 +18,16 @@ void *__wrap_malloc(size_t n) { assert(!audio_alloc_guard); return __real_malloc
 void *__wrap_calloc(size_t n, size_t m) { assert(!audio_alloc_guard); return __real_calloc(n, m); }
 void *__wrap_realloc(void *p, size_t n) { assert(!audio_alloc_guard); return __real_realloc(p, n); }
 void __wrap_free(void *p) { assert(!audio_alloc_guard); __real_free(p); }
+#endif
 static _Atomic int fake_clock, deny_priority;
 static _Atomic uint64_t fake_time;
 uint64_t ap_live_test_now(void) {
     if (atomic_load(&fake_clock)) return atomic_fetch_add(&fake_time, 10000000);
-    struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint64_t)t.tv_sec * 1000000000u + t.tv_nsec;
+    return ap_clock_ns();
 }
 int ap_live_test_deny_priority(void) { return atomic_load(&deny_priority); }
 static void pause_ms(long ms) {
-    struct timespec t = { ms / 1000, (ms % 1000) * 1000000 };
-    nanosleep(&t, NULL);
+    ap_sleep_ns((uint64_t)ms * 1000000);
 }
 static ap_live_config config = { 48000, 32, 2, 4, AP_LIVE_DEVICE, 0 };
 static ap_live *open_session(const char *path, const char *id) {
@@ -88,8 +87,8 @@ static void device_tests(const char *path) {
     assert(ap_live_start(s) == AP_LIVE_STATE);
     assert(ap_live_close(s) == AP_LIVE_STATE);
     assert(ap_live_device_begin(s) == AP_LIVE_THREAD);
-    device d = { .s = s }; pthread_t thread;
-    assert(!pthread_create(&thread, NULL, device_run, &d));
+    device d = { .s = s }; ap_thread thread;
+    assert(!ap_thread_create(&thread, device_run, &d));
     assert(command(&d, 1) == 0);
     assert(command(&d, 4) == 0);
     assert(ap_live_device_process(s, output) == AP_LIVE_THREAD);
@@ -133,7 +132,7 @@ static void device_tests(const char *path) {
     assert(ap_live_get_stats(s, &stats) == 0 && !stats.callback_requested);
     assert(ap_live_stop(s) == AP_LIVE_AGAIN);
     assert(command(&d, 2) == AP_LIVE_STOPPED);
-    assert(command(&d, 3) == 0); pthread_join(thread, NULL);
+    assert(command(&d, 3) == 0); ap_thread_join(thread);
     assert(ap_live_stop(s) == 0);
     assert(ap_live_try_read(s, output, &tick, &sequence) == AP_LIVE_AGAIN);
     assert(ap_live_close(s) == 0);
@@ -141,8 +140,8 @@ static void device_tests(const char *path) {
 static void delay_test(const char *path) {
     ap_live *s = open_session(path, "ap.delay");
     assert(ap_live_start(s) == 0);
-    device d = { .s = s }; pthread_t thread;
-    assert(!pthread_create(&thread, NULL, device_run, &d));
+    device d = { .s = s }; ap_thread thread;
+    assert(!ap_thread_create(&thread, device_run, &d));
     assert(command(&d, 1) == 0);
     for (unsigned b = 0; b < 2; ++b) {
         float input[64];
@@ -154,7 +153,7 @@ static void delay_test(const char *path) {
             assert(d.output[i] == (frame < 16 ? 0 : frame - 15));
         }
     }
-    assert(command(&d, 3) == 0); pthread_join(thread, NULL);
+    assert(command(&d, 3) == 0); ap_thread_join(thread);
     assert(ap_live_stop(s) == 0); assert(ap_live_close(s) == 0);
 }
 static void timer_tests(const char *path) {

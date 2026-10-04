@@ -1,19 +1,17 @@
 #define _GNU_SOURCE
 #include "clap_live.h"
-#include "vendor/clap/clap.h"
-#include <dlfcn.h>
+#include "live_adapter.h"
+#include "live_platform.h"
+#ifdef AP_LIVE_WITH_DEVICE
+#include "live_device.h"
+#endif
 #include <errno.h>
 #include <math.h>
-#include <pthread.h>
-#include <sched.h>
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-#ifndef __linux__
-#error "Experimental CLAP live host currently supports Linux only"
-#endif
 
 /* No mutable global registry and no calls into the offline singleton. CLAP 1.2
  * explicitly permits nested entry.init/deinit calls by distinct hosts. */
@@ -37,10 +35,15 @@ typedef struct {
 
 struct ap_live {
     ap_live_config config;
-    pthread_t control, worker, device_thread;
+#ifdef AP_LIVE_WITH_DEVICE
+    ap_audio_device *device;
+    float *device_output;
+#endif
+    ap_thread_id control, device_thread;
+    ap_thread worker;
+    int control_owned;
     int joinable, activated, entry_initialized, device_started;
-    int previous_policy;
-    struct sched_param previous_priority;
+    ap_priority previous_priority;
     int priority_changed;
     void *module;
     const clap_plugin_entry_t *entry;
@@ -48,7 +51,9 @@ struct ap_live {
     clap_host_t host;
     clap_param_info_t *params;
     uint32_t nparams;
-    int midi_input;
+    _Atomic uint32_t latency;
+    const clap_plugin_latency_t *audio_latency;
+    int midi_input, block_parameters, notes_only;
     ring input, output;
     float *audio;
     float *in_ptr[2], *out_ptr[2];
@@ -77,20 +82,24 @@ static uint64_t now_ns(void) {
     extern uint64_t ap_live_test_now(void);
     return ap_live_test_now();
 #else
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
+    return ap_clock_ns();
 #endif
 }
 static int control(const ap_live *s) {
-    return s && pthread_equal(s->control, pthread_self());
+    return s && ap_thread_equal(s->control, ap_thread_self());
 }
 static bool CLAP_ABI is_main(const clap_host_t *h) { return control(h->host_data); }
 static bool CLAP_ABI is_audio(const clap_host_t *h) { return audio_session == h->host_data; }
 static const clap_host_thread_check_t thread_check = { is_main, is_audio };
+/* CLAP permits this notification only on control during activation. Query the
+ * final latency once activate returns, including when no notification arrives. */
+static void CLAP_ABI latency_changed(const clap_host_t *h) { (void)h; }
+static const clap_host_latency_t host_latency = { latency_changed };
 static const void *CLAP_ABI extension(const clap_host_t *h, const char *id) {
     (void)h;
-    return !strcmp(id, CLAP_EXT_THREAD_CHECK) ? &thread_check : NULL;
+    if (!strcmp(id, CLAP_EXT_THREAD_CHECK)) return &thread_check;
+    if (!strcmp(id, CLAP_EXT_LATENCY)) return &host_latency;
+    return NULL;
 }
 static void CLAP_ABI request_restart(const clap_host_t *h) {
     ap_live *s = h->host_data;
@@ -134,32 +143,42 @@ static int ring_init(ring *r, uint32_t n, size_t samples) {
     return 1;
 }
 static void dispose(ap_live *s) {
+#ifdef AP_LIVE_WITH_DEVICE
+    ap_audio_close(s->device);
+    free(s->device_output);
+#endif
     if (s->activated && s->plugin) s->plugin->deactivate(s->plugin);
     if (s->plugin) s->plugin->destroy(s->plugin);
     if (s->entry_initialized && s->entry) s->entry->deinit();
-    if (s->module) dlclose(s->module);
+    if (s->module) ap_module_close(s->module);
     ring_free(&s->input, s->config.queue_blocks);
     ring_free(&s->output, s->config.queue_blocks);
     free(s->audio);
     free(s->params);
+    ap_control_cleanup(s->control_owned);
     free(s);
 }
 uint32_t ap_live_abi_version(void) { return 1; }
 
-int ap_live_open(const char *path, const char *id, const ap_live_config *c, ap_live **result) {
+int ap_live_open_adapter(const char *path, const char *id, const ap_live_config *c, ap_live **result, ap_adapter_create create) {
     if (!result) return AP_LIVE_INVALID;
     *result = NULL;
+    if (!ap_control_allowed()) return AP_LIVE_THREAD;
     if (!path || !id || !c || !isfinite(c->sample_rate) || c->sample_rate < 1000 ||
         c->sample_rate > 768000 || !c->block_size || c->block_size > 8192 ||
         !c->channels || c->channels > 2 || c->queue_blocks < 2 || c->queue_blocks > 1024 ||
-        (c->queue_blocks & (c->queue_blocks - 1)) || c->driver > AP_LIVE_DEVICE || c->priority > 2)
+        (c->queue_blocks & (c->queue_blocks - 1)) || c->driver > AP_LIVE_HARDWARE || c->priority > 2)
         return AP_LIVE_INVALID;
+#ifndef AP_LIVE_WITH_DEVICE
+    if (c->driver == AP_LIVE_HARDWARE) return AP_LIVE_UNSUPPORTED;
+#endif
     ap_live *s = calloc(1, sizeof(*s));
     if (!s) return AP_LIVE_INVALID;
     s->config = *c;
-    s->control = pthread_self();
+    s->control = ap_thread_self();
+    if (ap_control_setup(&s->control_owned)) { free(s); return AP_LIVE_UNSUPPORTED; }
 #define INIT(name) atomic_init(&s->name, 0)
-    INIT(state); INIT(ready); INIT(stop); INIT(restart); INIT(callback);
+    INIT(latency); INIT(state); INIT(ready); INIT(stop); INIT(restart); INIT(callback);
     INIT(priority_granted); INIT(blocks); INIT(underruns); INIT(overruns);
     INIT(deadline_misses); INIT(process_errors); INIT(output_events_dropped); INIT(error);
 #undef INIT
@@ -174,9 +193,12 @@ int ap_live_open(const char *path, const char *id, const ap_live_config *c, ap_l
     s->host = (clap_host_t){ CLAP_VERSION_INIT, s, "AudioPlugins Live", "JuliaHub",
         "https://github.com/SciML/AudioPlugins.jl", "0.1", extension,
         request_restart, request_process, request_callback };
-    s->module = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (create) {
+        s->plugin = create(&s->host, path, id, c);
+    } else {
+    s->module = ap_module_open(path);
     if (!s->module) goto plugin_error;
-    s->entry = dlsym(s->module, "clap_entry");
+    s->entry = ap_module_symbol(s->module, "clap_entry");
     if (!s->entry || !clap_version_is_compatible(s->entry->clap_version) ||
         s->entry->clap_version.major < 1 ||
         (s->entry->clap_version.major == 1 && s->entry->clap_version.minor < 2) ||
@@ -185,6 +207,7 @@ int ap_live_open(const char *path, const char *id, const ap_live_config *c, ap_l
     const clap_plugin_factory_t *factory = s->entry->get_factory(CLAP_PLUGIN_FACTORY_ID);
     if (!factory) goto plugin_error;
     s->plugin = factory->create_plugin(factory, &s->host, id);
+    }
     if (!s->plugin || !s->plugin->init(s->plugin)) goto plugin_error;
     const clap_plugin_render_t *render = s->plugin->get_extension(s->plugin, CLAP_EXT_RENDER);
     if (render && !render->set(s->plugin, CLAP_RENDER_REALTIME)) goto plugin_error;
@@ -206,6 +229,9 @@ int ap_live_open(const char *path, const char *id, const ap_live_config *c, ap_l
             !(info.supported_dialects & CLAP_NOTE_DIALECT_MIDI)) goto unsupported;
         s->midi_input = 1;
     }
+    s->audio_latency = s->plugin->get_extension(s->plugin, "audioplugins.audio-latency");
+    s->notes_only = s->plugin->get_extension(s->plugin, "audioplugins.notes-only") != NULL;
+    s->block_parameters = s->plugin->get_extension(s->plugin, "audioplugins.block-parameters") != NULL;
     const clap_plugin_params_t *params = s->plugin->get_extension(s->plugin, CLAP_EXT_PARAMS);
     if (params) {
         s->nparams = params->count(s->plugin);
@@ -239,6 +265,10 @@ plugin_error:
     dispose(s); return AP_LIVE_PLUGIN;
 }
 
+int ap_live_open(const char *path, const char *id, const ap_live_config *c, ap_live **result) {
+    return ap_live_open_adapter(path, id, c, result, NULL);
+}
+
 static const clap_param_info_t *param_info(const ap_live *s, uint32_t id) {
     for (uint32_t i = 0; i < s->nparams; ++i) if (s->params[i].id == id) return s->params + i;
     return NULL;
@@ -255,12 +285,14 @@ int ap_live_try_write(ap_live *s, const float *samples, const ap_live_event *eve
         if (e->frame >= s->config.block_size || (i && e->frame < events[i-1].frame))
             return AP_LIVE_INVALID;
         if (e->type == AP_LIVE_PARAM) {
+            if (s->block_parameters && e->frame) return AP_LIVE_UNSUPPORTED;
             const clap_param_info_t *p = param_info(s, e->param_id);
             if (!p || (p->flags & CLAP_PARAM_IS_READONLY) || !isfinite(e->value) ||
                 e->value < p->min_value || e->value > p->max_value ||
                 ((p->flags & CLAP_PARAM_IS_STEPPED) && trunc(e->value) != e->value))
                 return AP_LIVE_INVALID;
-        } else if (e->type != AP_LIVE_MIDI || !s->midi_input) return AP_LIVE_UNSUPPORTED;
+        } else if (e->type != AP_LIVE_MIDI || !s->midi_input ||
+            (s->notes_only && (e->midi[0] & 0xf0) != 0x80 && (e->midi[0] & 0xf0) != 0x90)) return AP_LIVE_UNSUPPORTED;
     }
     uint32_t w = atomic_load_explicit(&s->input.write, memory_order_relaxed);
     uint32_t r = atomic_load_explicit(&s->input.read, memory_order_acquire);
@@ -288,13 +320,12 @@ int ap_live_try_read(ap_live *s, float *samples, uint64_t *tick, uint64_t *seque
 static int set_priority(ap_live *s) {
     atomic_store(&s->priority_granted, 0);
     if (!s->config.priority) return AP_LIVE_OK;
-    int denied = pthread_getschedparam(pthread_self(), &s->previous_policy, &s->previous_priority);
-    struct sched_param p = { .sched_priority = sched_get_priority_min(SCHED_FIFO) };
+    int denied = 0;
 #ifdef AP_LIVE_TEST
     extern int ap_live_test_deny_priority(void);
     if (ap_live_test_deny_priority()) denied = 1;
 #endif
-    if (!denied) denied = pthread_setschedparam(pthread_self(), SCHED_FIFO, &p);
+    if (!denied) denied = ap_priority_enter(&s->previous_priority, s->period_ns);
     if (denied) return s->config.priority == 2 ? AP_LIVE_PRIORITY : AP_LIVE_OK;
     s->priority_changed = 1;
     atomic_store(&s->priority_granted, 1);
@@ -302,17 +333,26 @@ static int set_priority(ap_live *s) {
 }
 static void restore_priority(ap_live *s) {
     if (s->priority_changed) {
-        if (pthread_setschedparam(pthread_self(), s->previous_policy, &s->previous_priority))
+        if (ap_priority_leave(&s->previous_priority))
             atomic_store(&s->error, AP_LIVE_PRIORITY);
         s->priority_changed = 0;
     }
 }
 static int audio_begin(ap_live *s) {
     int result = set_priority(s);
+#ifdef AP_LIVE_WITH_DEVICE
+    if (!result && s->device && ap_audio_enter(s->device)) {
+        atomic_store(&s->priority_granted, 0);
+        if (s->config.priority == 2) result = AP_LIVE_PRIORITY;
+    }
+#endif
     audio_session = s;
     if (result == AP_LIVE_OK && !s->plugin->start_processing(s->plugin)) result = AP_LIVE_PLUGIN;
     audio_session = NULL;
     if (result) {
+#ifdef AP_LIVE_WITH_DEVICE
+        if (s->device) ap_audio_leave(s->device);
+#endif
         restore_priority(s);
         atomic_store(&s->error, result);
         atomic_store(&s->state, AP_LIVE_FINISHED);
@@ -323,10 +363,13 @@ static void audio_end(ap_live *s) {
     audio_session = s;
     s->plugin->stop_processing(s->plugin);
     audio_session = NULL;
+#ifdef AP_LIVE_WITH_DEVICE
+    if (s->device) ap_audio_leave(s->device);
+#endif
     restore_priority(s);
     atomic_store_explicit(&s->state, AP_LIVE_FINISHED, memory_order_release);
 }
-static int process_block(ap_live *s, float *device_output) {
+static int process_block(ap_live *s, float *device_output, const float *capture) {
     uint32_t frames = s->config.block_size, channels = s->config.channels;
     size_t bytes = sizeof(float) * frames * channels;
     if (atomic_load_explicit(&s->stop, memory_order_acquire)) {
@@ -339,7 +382,7 @@ static int process_block(ap_live *s, float *device_output) {
     s->nevents = 0;
     if (r == w) {
         memset(s->audio, 0, bytes);
-        atomic_fetch_add_explicit(&s->underruns, 1, memory_order_relaxed);
+        if (!capture) atomic_fetch_add_explicit(&s->underruns, 1, memory_order_relaxed);
     } else {
         block *b = &s->input.slots[r & (s->config.queue_blocks - 1)];
         sequence = b->input_sequence;
@@ -364,6 +407,11 @@ static int process_block(ap_live *s, float *device_output) {
         }
         atomic_store_explicit(&s->input.read, r + 1, memory_order_release);
     }
+    if (capture) {
+        sequence = s->tick;
+        for (uint32_t ch = 0; ch < channels; ++ch)
+            for (uint32_t i = 0; i < frames; ++i) s->in_ptr[ch][i] = capture[i * channels + ch];
+    }
     memset(s->audio + frames * channels, 0, bytes);
     s->in_buffer.constant_mask = 0; s->out_buffer.constant_mask = 0;
     clap_input_events_t in = { s, event_count, event_get };
@@ -373,6 +421,7 @@ static int process_block(ap_live *s, float *device_output) {
         .audio_inputs_count = 1, .audio_outputs_count = 1, .in_events = &in, .out_events = &out };
     audio_session = s;
     clap_process_status status = s->plugin->process(s->plugin, &process);
+    if (s->audio_latency) atomic_store_explicit(&s->latency, s->audio_latency->get(s->plugin), memory_order_relaxed);
     audio_session = NULL;
     int result = AP_LIVE_OK;
     if (status == CLAP_PROCESS_ERROR) {
@@ -409,40 +458,90 @@ static void *timer_main(void *arg) {
     if (result) return NULL;
     uint64_t next = now_ns();
     while (!atomic_load_explicit(&s->stop, memory_order_acquire)) {
-        if (process_block(s, NULL) != AP_LIVE_OK) break;
+        if (process_block(s, NULL, NULL) != AP_LIVE_OK) break;
         next += s->period_ns;
         uint64_t now = now_ns();
         /* Do not spin trying to catch up after a scheduling stall. */
         if (now > next) next = now + s->period_ns;
-        struct timespec target = { (time_t)(next / 1000000000u), (long)(next % 1000000000u) };
-        int err;
-        while ((err = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &target, NULL)) == EINTR) {}
-        if (err) { atomic_store(&s->error, AP_LIVE_STATE); break; }
+        ap_sleep_until(next);
         if (now_ns() - next > s->period_ns)
             atomic_fetch_add_explicit(&s->deadline_misses, 1, memory_order_relaxed);
     }
     audio_end(s);
     return NULL;
 }
+#ifdef AP_LIVE_WITH_DEVICE
+int ap_live_configure_device(ap_live *s, const char *backend, int capture, int playback, int input) {
+    if (!control(s)) return AP_LIVE_THREAD;
+    if (s->activated || s->joinable || s->config.driver != AP_LIVE_HARDWARE) return AP_LIVE_STATE;
+    if ((capture != 0 && capture != 1) || playback < -1 || input < -1 ||
+        trunc(s->config.sample_rate) != s->config.sample_rate) return AP_LIVE_INVALID;
+    ap_audio_device *device = ap_audio_open(&s->config, backend, capture, playback, input);
+    if (!device) return AP_LIVE_UNSUPPORTED;
+    if (!s->device_output) s->device_output = calloc((size_t)s->config.block_size * s->config.channels, sizeof(float));
+    if (!s->device_output) { ap_audio_close(device); return AP_LIVE_STATE; }
+    ap_audio_close(s->device); s->device = device;
+    touch_pages(s->device_output, (size_t)s->config.block_size * s->config.channels * sizeof(float));
+    return AP_LIVE_OK;
+}
+int ap_live_get_device_stats(ap_live *s, ap_device_stats *stats) {
+    if (!control(s)) return AP_LIVE_THREAD;
+    if (!stats || !s->device) return AP_LIVE_INVALID;
+    ap_audio_stats(s->device, stats); return AP_LIVE_OK;
+}
+static void *hardware_main(void *arg) {
+    ap_live *s = arg;
+    int result = audio_begin(s);
+    atomic_store_explicit(&s->ready, 1, memory_order_release);
+    if (result) return NULL;
+    while (!atomic_load_explicit(&s->stop, memory_order_acquire)) {
+        const float *capture; uint64_t sequence;
+        result = ap_audio_wait(s->device, &capture, &sequence);
+        if (result) {
+            if (result != AP_LIVE_STOPPED) {
+                atomic_store(&s->error, result);
+                atomic_store(&s->stop, 1);
+            }
+            break;
+        }
+        s->tick = sequence;
+        if (process_block(s, s->device_output, capture)) break;
+        ap_audio_submit(s->device, s->device_output, sequence);
+    }
+    audio_end(s); return NULL;
+}
+#endif
 int ap_live_start(ap_live *s) {
     if (!control(s)) return AP_LIVE_THREAD;
     if (s->joinable || s->activated || atomic_load(&s->state) != AP_LIVE_PREPARED ||
         atomic_load(&s->restart)) return AP_LIVE_STATE;
+#ifdef AP_LIVE_WITH_DEVICE
+    if (s->config.driver == AP_LIVE_HARDWARE && !s->device) return AP_LIVE_STATE;
+    if (s->device) ap_audio_prepare(s->device);
+#endif
     atomic_store(&s->stop, 0); atomic_store(&s->ready, 0); atomic_store(&s->error, 0);
     if (!s->plugin->activate(s->plugin, s->config.sample_rate, s->config.block_size, s->config.block_size))
         return AP_LIVE_PLUGIN;
     s->activated = 1;
+    const clap_plugin_latency_t *latency = s->plugin->get_extension(s->plugin, CLAP_EXT_LATENCY);
+    s->latency = latency ? latency->get(s->plugin) : 0;
     atomic_store(&s->state, AP_LIVE_RUNNING);
     if (s->config.driver == AP_LIVE_DEVICE) return AP_LIVE_OK;
-    if (pthread_create(&s->worker, NULL, timer_main, s)) {
+    void *(*worker)(void *) = timer_main;
+#ifdef AP_LIVE_WITH_DEVICE
+    if (s->device) worker = hardware_main;
+#endif
+    if (ap_thread_create(&s->worker, worker, s)) {
         s->plugin->deactivate(s->plugin); s->activated = 0;
         atomic_store(&s->state, AP_LIVE_PREPARED);
         return AP_LIVE_STATE;
     }
     s->joinable = 1;
-    struct timespec pause = { 0, 1000000 };
-    while (!atomic_load_explicit(&s->ready, memory_order_acquire)) nanosleep(&pause, NULL);
+    while (!atomic_load_explicit(&s->ready, memory_order_acquire)) ap_sleep_ns(1000000);
     int result = atomic_load(&s->error);
+#ifdef AP_LIVE_WITH_DEVICE
+    if (!result && s->device) result = ap_audio_start(s->device);
+#endif
     if (result) ap_live_stop(s);
     return result;
 }
@@ -454,13 +553,16 @@ int ap_live_stop(ap_live *s) {
         return AP_LIVE_OK;
     }
     atomic_store_explicit(&s->stop, 1, memory_order_release);
+#ifdef AP_LIVE_WITH_DEVICE
+    if (s->device) ap_audio_stop(s->device);
+#endif
     if (s->config.driver == AP_LIVE_DEVICE) {
         if (atomic_flag_test_and_set_explicit(&s->device_guard, memory_order_acquire)) return AP_LIVE_AGAIN;
         int busy = s->device_started;
         atomic_flag_clear_explicit(&s->device_guard, memory_order_release);
         if (busy) return AP_LIVE_AGAIN;
     } else if (s->joinable) {
-        pthread_join(s->worker, NULL);
+        ap_thread_join(s->worker);
         s->joinable = 0;
     }
     s->plugin->deactivate(s->plugin); s->activated = 0;
@@ -478,7 +580,9 @@ int ap_live_close(ap_live *s) {
 }
 int ap_live_poll(ap_live *s) {
     if (!control(s)) return AP_LIVE_THREAD;
-    if (atomic_load_explicit(&s->restart, memory_order_acquire)) {
+    ap_pump_events();
+    if (atomic_load_explicit(&s->restart, memory_order_acquire) ||
+        (s->activated && atomic_load(&s->state) == AP_LIVE_FINISHED)) {
         int result = ap_live_stop(s);
         if (result) return result;
         if (atomic_exchange_explicit(&s->callback, 0, memory_order_acq_rel))
@@ -499,6 +603,13 @@ int ap_live_get_stats(const ap_live *s, ap_live_stats *stats) {
     stats->callback_requested = atomic_load_explicit(&s->callback, memory_order_relaxed);
     return AP_LIVE_OK;
 }
+int ap_live_get_latency(const ap_live *s, uint32_t *frames) {
+    if (!s || !frames) return AP_LIVE_INVALID;
+    if (!control(s)) return AP_LIVE_THREAD;
+    if (!s->activated) return AP_LIVE_STATE;
+    *frames = atomic_load_explicit(&s->latency, memory_order_relaxed);
+    return AP_LIVE_OK;
+}
 #ifdef AP_LIVE_TEST
 /* Force unsigned index rollover in the source probe without billions of ticks. */
 void ap_live_test_seed(ap_live *s, uint32_t index) {
@@ -513,7 +624,7 @@ int ap_live_device_begin(ap_live *s) {
     int result = AP_LIVE_STATE;
     if (!s->device_started && atomic_load(&s->state) == AP_LIVE_RUNNING && !atomic_load(&s->stop)) {
         result = audio_begin(s);
-        if (!result) { s->device_started = 1; s->device_thread = pthread_self(); }
+        if (!result) { s->device_started = 1; s->device_thread = ap_thread_self(); }
     }
     atomic_flag_clear_explicit(&s->device_guard, memory_order_release);
     return result;
@@ -522,7 +633,7 @@ int ap_live_device_process(ap_live *s, float *output) {
     if (!s || s->config.driver != AP_LIVE_DEVICE) return AP_LIVE_INVALID;
     if (atomic_flag_test_and_set_explicit(&s->device_guard, memory_order_acquire)) return AP_LIVE_AGAIN;
     int result = !s->device_started ? AP_LIVE_STATE :
-        !pthread_equal(s->device_thread, pthread_self()) ? AP_LIVE_THREAD : process_block(s, output);
+        !ap_thread_equal(s->device_thread, ap_thread_self()) ? AP_LIVE_THREAD : process_block(s, output, NULL);
     atomic_flag_clear_explicit(&s->device_guard, memory_order_release);
     return result;
 }
@@ -532,7 +643,7 @@ int ap_live_device_end(ap_live *s) {
     int result = AP_LIVE_STATE;
     if (s->device_started) {
         result = AP_LIVE_THREAD;
-        if (pthread_equal(s->device_thread, pthread_self())) {
+        if (ap_thread_equal(s->device_thread, ap_thread_self())) {
             audio_end(s); s->device_started = 0; result = AP_LIVE_OK;
         }
     }

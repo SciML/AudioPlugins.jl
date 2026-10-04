@@ -117,11 +117,17 @@ static bool CLAP_ABI param_get(const clap_plugin_t *p, uint32_t i, clap_param_in
 static const clap_plugin_audio_ports_t ports = { ports_count, ports_get };
 static const clap_plugin_note_ports_t notes = { ports_count, notes_get };
 static const clap_plugin_params_t params = { .count = param_count, .get_info = param_get };
+static uint32_t CLAP_ABI latency(const clap_plugin_t *p) {
+    instance *s = p->plugin_data; main_thread(s); assert(s->active);
+    return s->mode == 1 ? 16 : 0;
+}
+static const clap_plugin_latency_t latency_ext = { latency };
 static const void *CLAP_ABI extension(const clap_plugin_t *p, const char *id) {
     (void)p;
     if (!strcmp(id, CLAP_EXT_AUDIO_PORTS)) return &ports;
     if (!strcmp(id, CLAP_EXT_NOTE_PORTS)) return &notes;
     if (!strcmp(id, CLAP_EXT_PARAMS)) return &params;
+    if (!strcmp(id, CLAP_EXT_LATENCY)) return &latency_ext;
     return NULL;
 }
 static const char *const features[] = { CLAP_PLUGIN_FEATURE_AUDIO_EFFECT, NULL };

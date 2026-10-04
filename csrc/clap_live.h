@@ -1,5 +1,5 @@
 /* Experimental live ABI v1. Build clap_live.c separately with C11 and -pthread.
- * Linux only for now; no changes to the offline host or its ABI. */
+ * The offline host and its ABI remain independent. */
 #ifndef AP_CLAP_LIVE_H
 #define AP_CLAP_LIVE_H
 #include <stdint.h>
@@ -11,7 +11,7 @@ typedef struct ap_live ap_live;
 enum { AP_LIVE_OK = 0, AP_LIVE_AGAIN = 1, AP_LIVE_STOPPED = 2,
        AP_LIVE_INVALID = -1, AP_LIVE_THREAD = -2, AP_LIVE_STATE = -3,
        AP_LIVE_PLUGIN = -4, AP_LIVE_PRIORITY = -5, AP_LIVE_UNSUPPORTED = -6 };
-enum { AP_LIVE_TIMER = 0, AP_LIVE_DEVICE = 1 };
+enum { AP_LIVE_TIMER = 0, AP_LIVE_DEVICE = 1, AP_LIVE_HARDWARE = 2 };
 enum { AP_LIVE_PREPARED = 0, AP_LIVE_RUNNING = 1, AP_LIVE_FINISHED = 2 };
 enum { AP_LIVE_PARAM = 0, AP_LIVE_MIDI = 1 };
 #define AP_LIVE_MAX_EVENTS 64
@@ -68,6 +68,11 @@ int ap_live_try_read(ap_live *, float *, uint64_t *tick, uint64_t *input_sequenc
 /* Independent atomic counters, not a transactionally consistent snapshot.
  * Counters wrap modulo 2^32; tick and input_sequence are 64-bit ring payloads. */
 int ap_live_get_stats(const ap_live *, ap_live_stats *);
+/* Optional additive ABI v1 capability. Control thread only, after successful
+ * start and before stop. Returns plugin latency in frames, cached immediately
+ * after activation (zero without clap.latency). Excludes queue/device latency;
+ * no plugin method is called here and no compensation is performed. */
+int ap_live_get_latency(const ap_live *, uint32_t *frames);
 
 /* Native device backend contract (never call these from Julia): start arms the
  * session on control; begin/process/end run on one stable native audio thread.

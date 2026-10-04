@@ -43,3 +43,18 @@ comes from `lv2_jll`, and `lv2_host.c` is built against lilv (`Lilv_jll`),
 which is why it includes these through the include path (`-I csrc/vendor`)
 rather than by relative path: lilv's own headers include `<lv2/core/lv2.h>`
 too, and both must resolve to the same copy.
+
+## miniaudio.h — native playback/capture
+
+| | |
+|---|---|
+| Upstream | https://github.com/mackron/miniaudio |
+| Version | 0.11.23 |
+| Commit | `f40cf03f80cdb7e741d43e53b7e706e8c1394bcf` |
+| Licence | MIT-0 option of the upstream dual licence; see `miniaudio.LICENSE` |
+
+Verbatim upstream single header. Only device I/O and format conversion are
+compiled: decoding, encoding, resource management, node graph, engine and signal
+generation are disabled. No codec dependency is introduced. Native system APIs
+are loaded by miniaudio; the null backend must be explicitly selected for tests.
+The dedicated plugin worker and bounded callback rings live in our own sources.

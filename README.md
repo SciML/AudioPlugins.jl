@@ -132,14 +132,14 @@ exercise the new ABI before its JLL release.
 
 ## Experimental native live hosting
 
-The first native live adapter is available from source for **CLAP on Linux**:
-[`docs/src/live.md`](docs/src/live.md) documents the control-thread contract,
-device-clock boundary, build command and Julia `open_live` API. It has isolated
-sessions, bounded audio/event queues, a native timer driver, and a C entry point
-for a future native device backend. The timer does not open an audio device.
-The released JLLs remain supported; this experimental API requires an explicit
-source-built library. LV2/VST3 live adapters, other OS backends, hardware device
-integration and JLL publication remain release work for issue #8.
+The source-built live engine supports **CLAP, LV2, and VST3**, with isolated
+sessions, bounded audio/event queues, and native timer or playback/capture
+drivers. Linux, macOS, and Windows platform code supplies control dispatch and
+optional realtime priority. [`docs/src/live.md`](docs/src/live.md) documents
+building, device selection, lifecycle rules, supported layouts, and limits.
+The released JLLs remain supported; live mode currently requires an explicit
+source-built library. Cross-platform CI, physical-device validation, and JLL
+publication gate the general release for issue #8.
 
 ## Plugin collections
 
