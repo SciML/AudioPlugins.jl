@@ -31,7 +31,7 @@ struct ap_audio_device {
     ap_live_config config;
     device_ring capture_ring, playback_ring;
     float *staging, *worker_capture, *playback;
-    uint32_t offset, device_period, device_rate;
+    uint32_t offset, device_period, device_rate, pipeline_blocks, max_callback_frames;
     uint64_t clock;
     int capture, context_ready, device_ready, semaphore_ready;
     _Atomic uint32_t closing, lost, underruns, overruns, wake_pending;
@@ -103,14 +103,22 @@ static void notification(const ma_device_notification *notification) {
         }
     }
 }
-/* Bounded frame reblocking: callbacks may have any frame count. Capture and
- * playback use the same device timeline and miniaudio's configured rate.
- * Output is due exactly two blocks later. Late results are discarded instead
- * of accumulating latency after a slow plugin/OS scheduling interruption. */
+/* Frame reblocking within the negotiated device buffer budget. The fixed
+ * output delay accommodates a whole hardware burst without relying on the
+ * worker being scheduled between adjacent callbacks. Late output is discarded
+ * instead of accumulating latency after a slow plugin or scheduling stall. */
 static void callback(ma_device *device, void *output, const void *input, ma_uint32 frames) {
     ap_audio_device *d = device->pUserData;
     uint32_t channels = d->config.channels, block = d->config.block_size;
     float *out = output; const float *in = input;
+    if (frames > d->max_callback_frames) {
+        atomic_store_explicit(&d->lost, 1, memory_order_release);
+        signal_worker(d);
+    }
+    if (atomic_load_explicit(&d->lost, memory_order_acquire) ||
+        atomic_load_explicit(&d->closing, memory_order_acquire)) {
+        memset(out, 0, (size_t)frames * channels * sizeof(float)); return;
+    }
     if (atomic_flag_test_and_set_explicit(&d->callback_guard, memory_order_acquire)) {
         memset(out, 0, (size_t)frames * channels * sizeof(float));
         atomic_fetch_add_explicit(&d->underruns, 1, memory_order_relaxed); return;
@@ -134,7 +142,7 @@ static void callback(ma_device *device, void *output, const void *input, ma_uint
             atomic_store_explicit(&d->playback_ring.read, r, memory_order_release);
             if (!found) {
                 memset(d->playback, 0, (size_t)block * channels * sizeof(float));
-                if (d->clock >= 2) atomic_fetch_add_explicit(&d->underruns, 1, memory_order_relaxed);
+                if (d->clock >= d->pipeline_blocks) atomic_fetch_add_explicit(&d->underruns, 1, memory_order_relaxed);
             }
         }
         for (uint32_t ch = 0; ch < channels; ++ch) {
@@ -167,6 +175,25 @@ static int ring_init(device_ring *r, const ap_live_config *c) {
     pretouch(r->sequences, c->queue_blocks * sizeof(uint64_t));
     return 1;
 }
+/* Device transport queues are independent of the user-facing queues. Size
+ * them once, on control, for the negotiated total hardware buffer converted
+ * to the session rate, plus one block of converter/rounding headroom. Another
+ * block of fixed delay handles partially filled capture blocks. Reject rather
+ * than allocate unbounded buffers for unreasonable backend configurations. */
+static int configure_transport(ap_audio_device *d) {
+    uint64_t native_frames = (uint64_t)d->device_period * d->device.playback.internalPeriods;
+    uint32_t rate = d->device.sampleRate, block = d->config.block_size;
+    if (!native_frames || native_frames > UINT32_MAX || !d->device_rate || !rate || !block) return 0;
+    uint64_t frames = (native_frames * rate + d->device_rate - 1) / d->device_rate;
+    uint64_t burst_blocks = (frames + block - 1) / block + 1;
+    if (burst_blocks >= 512 || burst_blocks * block > UINT32_MAX) return 0;
+    d->pipeline_blocks = (uint32_t)burst_blocks + 1;
+    d->max_callback_frames = (uint32_t)burst_blocks * block;
+    uint32_t capacity = d->config.queue_blocks;
+    while (capacity < 2 * d->pipeline_blocks) capacity *= 2;
+    d->config.queue_blocks = capacity;
+    return 1;
+}
 void ap_audio_close(ap_audio_device *d) {
     if (!d) return;
     atomic_store(&d->closing, 1);
@@ -188,7 +215,6 @@ ap_audio_device *ap_audio_open(const ap_live_config *c, const char *backend, int
     atomic_init(&d->workgroup_joined, 0);
     atomic_init(&d->closing, 0); atomic_init(&d->lost, 0);
     atomic_init(&d->underruns, 0); atomic_init(&d->overruns, 0); atomic_flag_clear(&d->callback_guard);
-    if (!ring_init(&d->capture_ring, c) || !ring_init(&d->playback_ring, c)) goto fail;
     size_t samples = (size_t)c->block_size * c->channels;
     d->staging = calloc(samples, sizeof(float)); d->worker_capture = calloc(samples, sizeof(float));
     d->playback = calloc(samples, sizeof(float));
@@ -204,6 +230,7 @@ ap_audio_device *ap_audio_open(const ap_live_config *c, const char *backend, int
     config.playback.format = config.capture.format = ma_format_f32;
     config.playback.channels = config.capture.channels = c->channels;
     config.sampleRate = (ma_uint32)c->sample_rate; config.periodSizeInFrames = c->block_size;
+    config.noFixedSizedCallback = MA_TRUE;
     config.dataCallback = callback; config.notificationCallback = notification; config.pUserData = d;
     ma_device_info *outputs, *inputs; ma_uint32 noutputs, ninputs;
     if (playback_index >= 0 || capture_index >= 0) {
@@ -215,6 +242,8 @@ ap_audio_device *ap_audio_open(const ap_live_config *c, const char *backend, int
     d->device_ready = 1;
     d->device_period = d->device.playback.internalPeriodSizeInFrames;
     d->device_rate = d->device.playback.internalSampleRate;
+    if (!configure_transport(d) || !ring_init(&d->capture_ring, &d->config) ||
+        !ring_init(&d->playback_ring, &d->config)) goto fail;
 #ifdef AP_WORKGROUP
     if (__builtin_available(macOS 11.0, *)) {
         if (d->context.backend == ma_backend_coreaudio) {
@@ -277,13 +306,13 @@ void ap_audio_submit(ap_audio_device *d, const float *samples, uint64_t sequence
     uint32_t slot = w & (d->config.queue_blocks - 1);
     size_t n = (size_t)d->config.block_size * d->config.channels;
     memcpy(d->playback_ring.samples + slot * n, samples, n * sizeof(float));
-    d->playback_ring.sequences[slot] = sequence + 2;
+    d->playback_ring.sequences[slot] = sequence + d->pipeline_blocks;
     atomic_store_explicit(&d->playback_ring.write, w + 1, memory_order_release);
 }
 void ap_audio_stats(ap_audio_device *d, ap_device_stats *s) {
     s->underruns = atomic_load(&d->underruns); s->overruns = atomic_load(&d->overruns); s->lost = atomic_load(&d->lost);
     s->workgroup_joined = atomic_load(&d->workgroup_joined);
-    s->buffering_frames = 2 * d->config.block_size; s->capture = d->capture;
+    s->buffering_frames = d->pipeline_blocks * d->config.block_size; s->capture = d->capture;
     s->device_period_frames = d->device_period;
     s->device_sample_rate = d->device_rate; s->backend = d->context.backend;
 }

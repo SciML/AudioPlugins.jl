@@ -114,8 +114,14 @@ callback copies capture/clock information into a bounded ring and signals the
 worker; it never invokes a plugin or waits for Julia or processing. Capture and
 playback are converted by miniaudio to the configured interleaved Float32 format.
 
-The worker's output is due exactly two processing blocks after capture. Missing
-or late output becomes silence; stale output is discarded, keeping host
+The worker's output has a fixed delay chosen at opening from the negotiated
+hardware buffer (period size times period count, converted to the session rate),
+rounded up to whole processing blocks, plus two blocks for conversion and partial
+capture. This allows a whole hardware burst to arrive before the worker runs.
+The native transport queues grow independently of `queue_blocks`, up to 1024
+blocks; larger requirements fail to open. A callback exceeding the negotiated
+budget is silenced and marks the device lost, requiring reopening. The exact
+host delay is `device_stats(s).buffering_frames`. Missing or late output becomes silence; stale output is discarded, keeping host
 pipeline latency fixed instead of accumulating delay after a stall. Shutdown
 quiesces device callbacks, wakes and joins the worker, then deactivates on
 control. Device interruption, unexpected stop, or routing change marks the
@@ -147,7 +153,7 @@ wall-clock timestamps. Plugin output events are dropped and counted.
 `live_latency` reports plugin latency in frames after start. CLAP/VST3 cache it
 after activation; LV2 publishes its latency control output atomically after
 each processing block. No plugin query runs concurrently on control. This value
-excludes input queue depth, the two-block hardware pipeline, and device latency;
+excludes input queue depth, the reported hardware pipeline, and device latency;
 no latency compensation is performed.
 
 All host processing storage is allocated and touched before starting. Processing

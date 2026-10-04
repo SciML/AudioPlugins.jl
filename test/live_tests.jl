@@ -59,7 +59,8 @@ end
                         @test output == fill(0.5f0, 32channels)
                         @test live_latency(s) == 0
                         if driver == :device
-                            @test device_stats(s).buffering_frames == 64
+                            @test device_stats(s).buffering_frames >= 64
+                            @test device_stats(s).buffering_frames % 32 == 0
                             @test device_stats(s).lost == 0
                         end
                         before = live_stats(s).blocks

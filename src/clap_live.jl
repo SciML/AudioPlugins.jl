@@ -160,8 +160,10 @@ on/off; other MIDI messages are rejected. CLAP requires version ≥ 1.2.
 
 `queue_blocks` must be a power of two from 2 to 1024. `priority` is `:normal`,
 `:best_effort`, or `:strict`; strict fails if native priority is unavailable.
-Device output has a fixed two-block host pipeline; missing or late output is
-silence and counted separately in [`device_stats`](@ref).
+Device output has a fixed host delay sized at opening for the negotiated device
+buffer. Its transport queues grow independently of `queue_blocks`, up to 1024
+blocks; unsupported buffer sizes fail to open. Missing or late output is silence
+and counted separately in [`device_stats`](@ref).
 
 The currently released JLL lacks this ABI: pass an explicit source-built
 `library`. Calls must stay on Julia thread 1. The do-block always stops and
