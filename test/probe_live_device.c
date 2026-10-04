@@ -6,6 +6,7 @@
 int main(void) {
     ap_audio_device *d = calloc(1, sizeof(*d)); assert(d);
     d->config = (ap_live_config){48000, 32, 2, 4, AP_LIVE_HARDWARE, 0}; d->capture = 1;
+    atomic_init(&d->wake_pending, 0); atomic_init(&d->workgroup_joined, 0);
     atomic_init(&d->closing, 0); atomic_init(&d->lost, 0);
     atomic_init(&d->underruns, 0); atomic_init(&d->overruns, 0); atomic_flag_clear(&d->callback_guard);
     assert(ring_init(&d->capture_ring, &d->config)); assert(ring_init(&d->playback_ring, &d->config));

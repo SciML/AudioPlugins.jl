@@ -175,6 +175,7 @@ static const clap_plugin_t *create(const clap_host_t *h, const char *path, const
     lv2_live *s = calloc(1, sizeof(*s)); if (!s) return NULL;
     volatile unsigned char *memory = (volatile unsigned char *)s;
     for (size_t i = 0; i < sizeof(*s); i += 4096) memory[i] = memory[i];
+    memory[sizeof(*s) - 1] = memory[sizeof(*s) - 1];
     s->api = (clap_plugin_t){.plugin_data = s, .init = init, .destroy = destroy,
         .activate = activate, .deactivate = deactivate, .start_processing = start,
         .stop_processing = stop, .process = process, .get_extension = extension, .on_main_thread = callback};

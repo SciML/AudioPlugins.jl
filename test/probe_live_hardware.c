@@ -48,6 +48,12 @@ int main(int argc, char **argv) {
         assert(transport.lost);
         assert(ap_live_start(s) == AP_LIVE_STATE);
         assert(!ap_live_close(s));
+        /* Asynchronous route/loss notifications may also arrive while idle. */
+        assert(!ap_live_open(argv[1], "ap.live", &config, &s));
+        assert(!ap_live_configure_device(s, "null", capture, -1, -1));
+        ap_live_test_device_loss(s);
+        assert(ap_live_start(s) == AP_LIVE_STATE);
+        assert(!ap_live_close(s));
         config.priority = 2;
         assert(!ap_live_open(argv[1], "ap.live", &config, &s));
         assert(!ap_live_configure_device(s, "null", capture, -1, -1));

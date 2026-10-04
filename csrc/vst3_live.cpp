@@ -212,6 +212,7 @@ static const clap_plugin_t *create(const clap_host_t *host, const char *path, co
         auto s = std::make_unique<State>();
         volatile unsigned char *memory = reinterpret_cast<volatile unsigned char *>(s.get());
         for (size_t i = 0; i < sizeof(State); i += 4096) memory[i] = memory[i];
+        memory[sizeof(State) - 1] = memory[sizeof(State) - 1];
         s->host = host; s->config = *config;
         s->context.host = s->handler.host = host;
         std::string error;

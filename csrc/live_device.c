@@ -34,7 +34,7 @@ struct ap_audio_device {
     uint32_t offset, device_period, device_rate;
     uint64_t clock;
     int capture, context_ready, device_ready, semaphore_ready;
-    _Atomic uint32_t closing, lost, underruns, overruns;
+    _Atomic uint32_t closing, lost, underruns, overruns, wake_pending;
     atomic_flag callback_guard;
     _Atomic uint32_t workgroup_joined;
 #ifdef AP_WORKGROUP
@@ -45,6 +45,7 @@ struct ap_audio_device {
 static void pretouch(void *memory, size_t bytes) {
     volatile unsigned char *p = memory;
     for (size_t i = 0; i < bytes; i += 4096) p[i] = p[i];
+    if (bytes) p[bytes - 1] = p[bytes - 1];
 }
 static int backend_context(const char *name, ma_context *context) {
     ma_backend backend;
@@ -84,6 +85,13 @@ int ap_live_audio_devices(const char *backend, int capture, int index, char *nam
     }
     ma_context_uninit(&context); return result;
 }
+/* A binary wake notification bounds semaphore tokens even during repeated
+ * failed starts. The semaphore stays alive until device uninitialization has
+ * quiesced both data callbacks and asynchronous device notifications. */
+static void signal_worker(ap_audio_device *d) {
+    if (!atomic_exchange_explicit(&d->wake_pending, 1, memory_order_acq_rel))
+        ma_semaphore_release(&d->wake);
+}
 static void notification(const ma_device_notification *notification) {
     ap_audio_device *d = notification->pDevice->pUserData;
     if (notification->type == ma_device_notification_type_stopped ||
@@ -91,7 +99,7 @@ static void notification(const ma_device_notification *notification) {
         notification->type == ma_device_notification_type_rerouted) {
         if (!atomic_load_explicit(&d->closing, memory_order_acquire)) {
             atomic_store_explicit(&d->lost, 1, memory_order_release);
-            ma_semaphore_release(&d->wake);
+            signal_worker(d);
         }
     }
 }
@@ -143,7 +151,7 @@ static void callback(ma_device *device, void *output, const void *input, ma_uint
                     (size_t)block * channels * sizeof(float));
                 d->capture_ring.sequences[slot] = d->clock;
                 atomic_store_explicit(&d->capture_ring.write, w + 1, memory_order_release);
-                ma_semaphore_release(&d->wake);
+                signal_worker(d);
             } else atomic_fetch_add_explicit(&d->overruns, 1, memory_order_relaxed);
             d->offset = 0; ++d->clock;
         }
@@ -176,6 +184,7 @@ ap_audio_device *ap_audio_open(const ap_live_config *c, const char *backend, int
     ap_audio_device *d = calloc(1, sizeof(*d)); if (!d) return NULL;
     pretouch(d, sizeof(*d));
     d->config = *c; d->capture = !!capture;
+    atomic_init(&d->wake_pending, 0);
     atomic_init(&d->workgroup_joined, 0);
     atomic_init(&d->closing, 0); atomic_init(&d->lost, 0);
     atomic_init(&d->underruns, 0); atomic_init(&d->overruns, 0); atomic_flag_clear(&d->callback_guard);
@@ -223,14 +232,11 @@ fail:
 }
 int ap_audio_prepare(ap_audio_device *d) {
     /* Called only with device stopped and processing worker joined. */
-    if (d->semaphore_ready) ma_semaphore_uninit(&d->wake);
-    d->semaphore_ready = 0;
-    if (ma_semaphore_init(0, &d->wake) != MA_SUCCESS) return AP_LIVE_STATE;
-    d->semaphore_ready = 1;
+    if (atomic_load_explicit(&d->lost, memory_order_acquire)) return AP_LIVE_STATE;
     d->offset = 0; d->clock = 0;
     atomic_store(&d->capture_ring.read, 0); atomic_store(&d->capture_ring.write, 0);
     atomic_store(&d->playback_ring.read, 0); atomic_store(&d->playback_ring.write, 0);
-    atomic_store(&d->closing, 0); atomic_store(&d->lost, 0);
+    atomic_store(&d->closing, 0);
     return AP_LIVE_OK;
 }
 int ap_audio_start(ap_audio_device *d) {
@@ -238,16 +244,15 @@ int ap_audio_start(ap_audio_device *d) {
 }
 void ap_audio_wake(ap_audio_device *d) {
     atomic_store_explicit(&d->closing, 1, memory_order_release);
-    ma_semaphore_release(&d->wake);
+    signal_worker(d);
 }
 void ap_audio_stop(ap_audio_device *d) {
     atomic_store_explicit(&d->closing, 1, memory_order_release);
     ma_device_stop(&d->device); /* Joins/quiesces native callbacks, off audio. */
-    ma_semaphore_release(&d->wake);
+    signal_worker(d);
 }
 int ap_audio_wait(ap_audio_device *d, const float **capture, uint64_t *sequence) {
     for (;;) {
-        if (ma_semaphore_wait(&d->wake) != MA_SUCCESS) return AP_LIVE_STATE;
         if (atomic_load_explicit(&d->lost, memory_order_acquire)) return AP_LIVE_STATE;
         if (atomic_load_explicit(&d->closing, memory_order_acquire)) return AP_LIVE_STOPPED;
         uint32_t r = atomic_load_explicit(&d->capture_ring.read, memory_order_relaxed);
@@ -261,6 +266,8 @@ int ap_audio_wait(ap_audio_device *d, const float **capture, uint64_t *sequence)
             atomic_store_explicit(&d->capture_ring.read, r + 1, memory_order_release);
             return AP_LIVE_OK;
         }
+        if (ma_semaphore_wait(&d->wake) != MA_SUCCESS) return AP_LIVE_STATE;
+        atomic_store_explicit(&d->wake_pending, 0, memory_order_release);
     }
 }
 void ap_audio_submit(ap_audio_device *d, const float *samples, uint64_t sequence) {

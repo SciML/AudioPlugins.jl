@@ -175,6 +175,8 @@ progress during Julia GC on Linux/macOS/Windows. Native probes check control/aud
 identity, event offsets, saturation, index rollover, deadline injection, denied
 priority, irregular device callback sizes, late playback, and device loss.
 Linux probes also run address/undefined/thread sanitizers and 32-bit builds.
+`test/probe_live_formats.c` is a standalone native client for gain fixtures
+(`format path id channels`), suitable for adapter sanitizer and leak checks.
 Allocation guards check the linked host path; they cannot certify allocations
 inside arbitrary shared-library plugins.
 
