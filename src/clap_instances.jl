@@ -17,8 +17,8 @@ is idempotent; a closed handle never names a later instance. Calls into the
 host must be serialized: instances may coexist, but parallel calls from
 multiple threads are not supported. Latency is reported, not compensated.
 
-Requires a host library built from the accompanying C sources with the
-instance API; see [`clap_lib_path`](@ref) for the development override.
+Requires CLAPHost_jll 1.3, which exports the instance API; see
+[`clap_lib_path`](@ref) for the development override.
 """
 struct ClapInstance
     handle::Float64
