@@ -16,7 +16,7 @@ is for.
 
 Tracked as [issue #7](https://github.com/SciML/AudioPlugins.jl/issues/7).
 
-## No realtime discipline
+## [No realtime discipline in the synchronous hosts](@id No-realtime-discipline)
 
 CLAP asks a host to call `process()` from a realtime thread that never blocks, never
 allocates and never takes a lock, and it asks the host to honour the same discipline. A
@@ -30,6 +30,11 @@ with a deadline, where a plugin that allocates or blocks inside `process()` prod
 dropouts that look like a modelling error.
 
 Tracked as [issue #8](https://github.com/SciML/AudioPlugins.jl/issues/8).
+
+An opt-in [experimental native live host](live.md) now exists from source for
+Linux CLAP. It provides a separate processing path and a native device-clock
+interface; actual audio-device integration and the other formats/platforms
+remain pending. It does not change the synchronous contract described here.
 
 ## Reported latency is surfaced, not compensated, by default
 

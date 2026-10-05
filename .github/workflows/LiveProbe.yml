@@ -1,0 +1,40 @@
+name: Native live probes
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  live:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [address, thread, i686]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install 32-bit compiler support
+        if: matrix.mode == 'i686'
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+      - name: Build and run
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          case "$MODE" in
+            address) FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer' ;;
+            thread) FLAGS='-fsanitize=thread' ;;
+            i686) FLAGS='-m32' ;;
+          esac
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror $FLAGS -fPIC -shared -o ap_live.clap test/plugins/ap_test_live.c
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror $FLAGS -DAP_LIVE_TEST -o probe_live test/probe_clap_live.c csrc/clap_live.c -pthread -ldl -lm -Wl,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror $FLAGS -o probe_device test/probe_live_device.c -pthread -ldl -lm
+          cc -std=c11 -O1 -g -Wall -Wextra -Werror $FLAGS -DAP_LIVE_TEST -DAP_LIVE_WITH_DEVICE -o probe_hardware test/probe_live_hardware.c csrc/clap_live.c csrc/live_device.c -pthread -ldl -lm
+          if [ "$MODE" = thread ]; then
+            # Recent kernels can place mappings in GCC TSan's shadow range.
+            timeout 60 setarch "$(uname -m)" -R ./probe_live "$PWD/ap_live.clap"
+            timeout 60 setarch "$(uname -m)" -R ./probe_device
+            timeout 60 setarch "$(uname -m)" -R ./probe_hardware "$PWD/ap_live.clap"
+          else
+            timeout 60 ./probe_live "$PWD/ap_live.clap"
+            timeout 60 ./probe_device
+            timeout 60 ./probe_hardware "$PWD/ap_live.clap"
+          fi

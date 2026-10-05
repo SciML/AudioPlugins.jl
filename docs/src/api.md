@@ -38,6 +38,27 @@ clap_plugin_index
 clap_last_error
 ```
 
+## Experimental native live hosting
+
+```@docs
+LiveSession
+ClapLiveSession
+DeviceStats
+audio_devices
+device_stats
+LiveEvent
+LiveStats
+live_available
+open_live
+start!
+stop!
+poll!
+try_write!
+try_read!
+live_stats
+live_latency
+```
+
 ## Hosting: the bundle registry
 
 Which `.clap` modules are available, and what is in them. Nothing is registered until

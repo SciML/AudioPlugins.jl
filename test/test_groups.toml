@@ -66,3 +66,13 @@ versions = ["1"]
 [CLAPInstances]
 versions = ["lts", "1"]
 os = ["ubuntu-latest", "macos-latest", "windows-latest"]
+
+# Native live adapter on Linux; other platforms check the availability gate.
+[CLAPLive]
+versions = ["lts", "1"]
+os = ["ubuntu-latest", "macos-latest", "windows-latest"]
+
+# Full native live engine, format adapters, and null audio device.
+[Live]
+versions = ["lts", "1"]
+os = ["ubuntu-latest", "macos-latest", "windows-latest"]

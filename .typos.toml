@@ -12,3 +12,6 @@ mis = "mis"
 [default.extend-identifiers]
 # ProcessContext::continousTimeSamples is spelled that way by the VST3 SDK.
 continousTimeSamples = "continousTimeSamples"
+
+# mach_timebase_info_data_t uses this field name in the macOS SDK.
+numer = "numer"

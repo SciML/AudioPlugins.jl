@@ -6,6 +6,7 @@ version = "1.7.0"
 [deps]
 CLAPHost_jll = "c9c4f589-041a-5a1c-a149-a4cdc6e5211b"
 LV2Host_jll = "a1fb6e78-af1d-557a-bd91-b38940fc92f3"
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 Scratch = "6c6a2e73-6563-6170-7368-637461726353"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 VST3Host_jll = "8b4e5a1f-1c28-515c-95ad-97e06c9f19bd"
@@ -34,11 +35,10 @@ lv2_jll = "1.18"
 
 [extras]
 JuliaC = "acedd4c2-ced6-4a15-accc-2607eb759ba2"
-Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 SafeTestsets = "1bc83da4-3b8d-516f-aca4-4fe02f6d838f"
 SciMLTesting = "09d9d899-5365-40a9-917a-5f67fddea283"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 vst3sdk_jll = "5fb43a78-d80e-51e2-8ddb-474e9b1a8821"
 
 [targets]
-test = ["JuliaC", "Libdl", "SafeTestsets", "SciMLTesting", "Test", "vst3sdk_jll"]
+test = ["JuliaC", "SafeTestsets", "SciMLTesting", "Test", "vst3sdk_jll"]

@@ -130,6 +130,17 @@ compat floor updated, use the local-build preference described above. The
 `CLAPInstances` test group compiles the shipped sources directly so CI can
 exercise the new ABI before its JLL release.
 
+## Experimental native live hosting
+
+The source-built live engine supports **CLAP, LV2, and VST3**, with isolated
+sessions, bounded audio/event queues, and native timer or playback/capture
+drivers. Linux, macOS, and Windows platform code supplies control dispatch and
+optional realtime priority. [`docs/src/live.md`](docs/src/live.md) documents
+building, device selection, lifecycle rules, supported layouts, and limits.
+The released JLLs remain supported; live mode currently requires an explicit
+source-built library. Cross-platform CI, physical-device validation, and JLL
+publication gate the general release for issue #8.
+
 ## Plugin collections
 
 Opening a plugin by path works; a collection shipped as a JLL has a path only the JLL
@@ -452,8 +463,8 @@ deactivates the others (a sidechain input, event buses); no editor is ever creat
 - **Third-party binary code runs in-process.** A plugin that segfaults takes the Julia
   process down with it. Out-of-process hosting is the robust answer and is a much larger
   project; in-process is fine for offline work, and that is what this is for.
-- **Realtime discipline is not provided.** CLAP and VST3 alike ask a host to keep an
-  audio thread that never blocks and never allocates (VST3 additionally distinguishes
+- **The synchronous hosts do not provide realtime discipline.** CLAP and VST3 alike
+  ask a host to keep an audio thread that never blocks and never allocates (VST3 additionally distinguishes
   the main thread from the processing thread; this host calls everything from whichever
   thread calls it). A garbage-collected process driving a solver that may retry a step
   cannot promise that. Harmless offline; not harmless on a live capture with a deadline.

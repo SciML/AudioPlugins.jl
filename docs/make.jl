@@ -26,6 +26,7 @@ makedocs(
     pages = [
         "index.md",
         "Hosting a plugin" => "hosting.md",
+        "Experimental live hosting" => "live.md",
         "Authoring a plugin" => "authoring.md",
         "Plugin collections" => "collections.md",
         "Collection API" => "collections_api.md",
