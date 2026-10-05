@@ -8,6 +8,11 @@ function await_output(s, out)
     end
     error("native processing failed to produce output: $(live_stats(s))")
 end
+@testset "registered JLL live ABI" begin
+    for format in (:clap, :lv2, :vst3)
+        @test live_available(; format)
+    end
+end
 @testset "live formats and devices" begin
     mktempdir() do dir
         lib, sdk = build_live(joinpath(dir, "build"))
