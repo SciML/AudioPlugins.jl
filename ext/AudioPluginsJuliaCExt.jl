@@ -42,7 +42,7 @@ function AudioPlugins._export_julia_step(
         write(joinpath(dir, spec.base * ".h"), reflected.header)
         wrapper = emit_wrapper(format, spec, dir)
         cflags = ["-I" * d for d in [wrapper.include_dirs; dir]]
-        push!(cflags, "-fvisibility=hidden -Wall -Wextra -Werror")
+        append!(cflags, ["-fvisibility=hidden", "-Wall", "-Wextra", "-Werror"])
         image = JuliaC.ImageRecipe(;
             output_type = "--output-lib", file = step.file,
             project = step.project, trim_mode = step.trim,
