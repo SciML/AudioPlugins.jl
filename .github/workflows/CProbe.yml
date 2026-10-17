@@ -9,6 +9,9 @@ on:
   push:
     branches: [main]
   pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   probe:
     # The LV2 step runs under LeakSanitizer, whose exit-time stop-the-world
