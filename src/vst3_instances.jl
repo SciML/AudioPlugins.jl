@@ -1,6 +1,10 @@
 # Independent VST3 instances, with the same scalar-double node ABI.
 export Vst3Instance, vst3_copy!, vst3_plugin_index, vst3_n_audio_in, vst3_n_audio_out
 
+@static if isdefined(Base, :ispublic)
+    eval(Expr(:public, :vst3_copy, :vst3_set, :vst3_expect))
+end
+
 """
     Vst3Instance(f::Function, path; kwargs...)
     Vst3Instance(path; class_id = "", sample_rate = 48000, block_size = 512, channels = 1)
@@ -17,8 +21,7 @@ is idempotent; a closed handle never names a later instance. Calls into the
 host must be serialized: instances may coexist, but parallel calls from
 multiple threads are not supported. Latency is reported, not compensated.
 
-Requires a host library built from the accompanying native sources with the
-instance API; see [`vst3_lib_path`](@ref) for the development override.
+Requires `VST3Host_jll` 1.4 or later; see [`vst3_lib_path`](@ref) for the development override.
 """
 struct Vst3Instance
     handle::Float64
@@ -78,7 +81,12 @@ from a generated node. Latency is not compensated.
 vst3_copy!(destination::Vst3Instance, source::Vst3Instance, token::Real) =
     vst3_copy(destination, source, token)
 
-"Scalar-double node operator for [`vst3_copy!`](@ref), also accepting instances."
+"""
+    AudioPlugins.vst3_copy(destination, source, token) -> token
+
+Scalar-double node operator for [`vst3_copy!`](@ref). Pass instances or their
+numeric handles; the destination receives the source's current output block.
+"""
 vst3_copy(destination, source, token) = ccall(
     (:vst3_in_copy_for, VST3_LIB), Cdouble, (Cdouble, Cdouble, Cdouble),
     destination, source, token

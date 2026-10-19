@@ -15,6 +15,35 @@ const LV2_PATH = lv2_default_path(lv2_test_bundle(; force = true))
 const SDK = (joinpath(vst3sdk_jll.artifact_dir, "include", "vst3sdk"), joinpath(vst3sdk_jll.artifact_dir, "lib", "vst3sdk"))
 const VST3_BUNDLE = vst3_test_bundle(SDK; force = true)
 
+@testset "public offline instance API" begin
+    @static if isdefined(Base, :ispublic)
+        for name in (:lv2_copy, :lv2_set, :lv2_expect, :vst3_copy, :vst3_set, :vst3_expect)
+            @test Base.ispublic(AudioPlugins, name)
+        end
+    end
+    for (format, constructor, path, idkey, id, value) in (
+            (:lv2, Lv2Instance, LV2_PATH, :uri, "urn:audioplugins:test:gain", 0.5),
+            (:vst3, Vst3Instance, VST3_BUNDLE, :class_id, AudioPlugins.VST3_TEST_GAIN, 0.125),
+        )
+        api(name) = getfield(AudioPlugins, Symbol(format, "_", name))
+        saved = Ref{Any}()
+        constructor(path; NamedTuple{(idkey,)}((id,))..., block_size = 32) do instance
+            saved[] = instance
+            @test api(:is_open)(instance)
+            @test api(:params)(instance)[1].max == 4
+            input = api(:fill!)(instance, ones(32))
+            input = api(:expect)(instance, input, api(:plugin_index)(instance))
+            @test isfinite(input)
+            input = api(:set)(instance, input, 0, value)
+            output = api(:process)(instance, input, -1, 0, -1, 0, -1, 0, -1, 0)
+            @test api(:out)(instance, output) == fill(0.5, 32)
+            @test api(:out_valid)(instance, output) == 1
+            @test api(:param_value)(instance, 0) == value
+        end
+        @test !api(:is_open)(saved[])
+    end
+end
+
 for (format, constructor, path, gain_id, pole_id, idkey, scale) in (
         (:lv2, OI.Lv2Instance, LV2_PATH, "urn:audioplugins:test:gain", "urn:audioplugins:test:onepole", :uri, 1),
         (:vst3, OI.Vst3Instance, VST3_BUNDLE, AudioPlugins.VST3_TEST_GAIN, AudioPlugins.VST3_TEST_ONEPOLE, :class_id, 4),

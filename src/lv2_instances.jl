@@ -1,6 +1,10 @@
 # Independent LV2 instances, with the same scalar-double node ABI.
 export Lv2Instance, lv2_copy!, lv2_plugin_index, lv2_n_audio_in, lv2_n_audio_out
 
+@static if isdefined(Base, :ispublic)
+    eval(Expr(:public, :lv2_copy, :lv2_set, :lv2_expect))
+end
+
 """
     Lv2Instance(f::Function, path; kwargs...)
     Lv2Instance(path; uri = "", sample_rate = 48000, block_size = 512, channels = 1)
@@ -17,8 +21,7 @@ is idempotent; a closed handle never names a later instance. Calls into the
 host must be serialized: instances may coexist, but parallel calls from
 multiple threads are not supported. Latency is reported, not compensated.
 
-Requires a host library built from the accompanying native sources with the
-instance API; see [`lv2_lib_path`](@ref) for the development override.
+Requires `LV2Host_jll` 1.4 or later; see [`lv2_lib_path`](@ref) for the development override.
 """
 struct Lv2Instance
     handle::Float64
@@ -78,7 +81,12 @@ from a generated node. Latency is not compensated.
 lv2_copy!(destination::Lv2Instance, source::Lv2Instance, token::Real) =
     lv2_copy(destination, source, token)
 
-"Scalar-double node operator for [`lv2_copy!`](@ref), also accepting instances."
+"""
+    AudioPlugins.lv2_copy(destination, source, token) -> token
+
+Scalar-double node operator for [`lv2_copy!`](@ref). Pass instances or their
+numeric handles; the destination receives the source's current output block.
+"""
 lv2_copy(destination, source, token) = ccall(
     (:lv2_in_copy_for, LV2_LIB), Cdouble, (Cdouble, Cdouble, Cdouble),
     destination, source, token
