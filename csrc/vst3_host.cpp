@@ -38,6 +38,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -662,7 +663,7 @@ static double vst3_process_ctx(State *st, double dep,
     const double vals[VST3_HOST_PARAM_SLOTS] = { v0, v1, v2, v3 };
     for (int i = 0; i < VST3_HOST_PARAM_SLOTS; i++) {
         const ParamInfo *p = find_param_ctx(st, ids[i]);
-        if (!p || p->readonly || !std::isfinite(vals[i])) continue;
+        if (!p || p->readonly || std::isnan(vals[i])) continue;
         size_t k = (size_t)(p - st->params.data());
         st->queued[k] = true;
         st->pending[k] = vals[i];

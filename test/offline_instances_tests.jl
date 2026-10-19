@@ -129,6 +129,12 @@ for (format, constructor, path, gain_id, pole_id, idkey, scale) in (
                     input = api(:set)(other, api(:fill!)(other, ones(32)), 0, value)
                     @test api(:out)(other, process(other, input)) == fill(expected, 32)
                 end
+                for (value, expected) in ((Inf, 4), (-Inf, 0))
+                    input = api(:fill!)(other, ones(32))
+                    output = process(other, input; id = 0, value = value)
+                    @test api(:out)(other, output) == fill(expected, 32)
+                    @test api(:param_value)(other, 0) == expected / 4
+                end
             end
         finally
             foreach(api(:close!), (gain, pole, other))
