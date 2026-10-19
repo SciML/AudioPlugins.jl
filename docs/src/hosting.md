@@ -2,7 +2,8 @@
 
 The host loads a plugin bundle, activates it at a fixed block size, and runs blocks of
 samples through it. The default API holds one plugin at a time;
-[`ClapInstance`](@ref) opens independent effects that can coexist in a chain.
+[`ClapInstance`](@ref), [`Lv2Instance`](@ref) and [`Vst3Instance`](@ref) open
+independent effects that can coexist in a chain.
 
 ## A first block
 
@@ -497,3 +498,45 @@ required 1.2 build does not provide it. Until that JLL is released and the
 compat floor updated, use the local-build preference described in [`clap_lib_path`](@ref). The
 `CLAPInstances` test group compiles the shipped sources directly so CI can
 exercise the new ABI before its JLL release.
+
+## Independent LV2 and VST3 effects
+
+[`Lv2Instance`](@ref) and [`Vst3Instance`](@ref) follow the same lifecycle and
+operator shape as [`ClapInstance`](@ref). Pass `uri` for LV2 or `class_id` for
+VST3, as with the default open functions. Pass the instance first to the format's
+fill, output, descriptor and configuration readers. Scalar node operators also
+accept the numeric `handle`. Calls must be serialized across instances.
+
+```julia
+path = lv2_default_path(lv2_test_bundle())
+Lv2Instance(path; uri = "urn:audioplugins:test:gain", block_size = 64) do gain
+    Lv2Instance(path; uri = "urn:audioplugins:test:onepole", block_size = 64) do filter
+        input = lv2_fill!(gain, ones(64))
+        input = AudioPlugins.lv2_expect(gain, input, lv2_plugin_index(gain))
+        input = AudioPlugins.lv2_set(gain, input, 0, 0.5)
+        output = AudioPlugins.lv2_process(gain, input, -1, 0, -1, 0, -1, 0, -1, 0)
+        copied = lv2_copy!(filter, gain, output)
+        result = AudioPlugins.lv2_process(filter, copied, 0, 0.25, -1, 0, -1, 0, -1, 0)
+        samples = lv2_out(filter, result)
+    end
+end
+```
+
+Use `vst3_*` for the same chain with VST3. VST3 parameter values are normalized
+to [0, 1], including `vst3_set`; `default_normalized` in `vst3_params(instance)` is
+the normalized default of each descriptor. LV2 values use the control port's
+plain units. Queue more than four parameters by chaining `lv2_set` or `vst3_set`.
+A repeated id keeps its last queued value, and explicit process slots take
+precedence. A fresh input block or a block copy clears pending parameters.
+
+Copying requires equal sample rates, block sizes and host channel counts.
+Tokens identify an instance's current block. Foreign or stale tokens and closed
+handles return `NaN` (or zero for validity readers). Closing one instance, scanning,
+or opening the default plugin leaves its peers usable. Latency is reported
+without compensation.
+
+These APIs require native hosts built from the accompanying sources. Until the
+matching LV2Host_jll and VST3Host_jll releases are available, build the libraries
+locally and set the JLL path preferences described in [`lv2_lib_path`](@ref) and
+[`vst3_lib_path`](@ref). The `OfflineInstances` test group builds those hosts from
+source against the JLL-provided lilv and VST3 SDK dependencies.
