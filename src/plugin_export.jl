@@ -629,7 +629,7 @@ function pkgconfig_flags(path::AbstractString)
     # pc_sysrootdir is always "/": this reader does not emulate
     # PKG_CONFIG_SYSROOT_DIR's rewrite of every -I/-L path.
     vars = Dict{String, String}(
-        "pcfiledir" => dirname(abspath(path)),
+        "pcfiledir" => "\${pcfiledir}",
         "pc_sysrootdir" => "/",
         "pc_top_builddir" => get(ENV, "PKG_CONFIG_TOP_BUILD_DIR", "\$(top_builddir)"),
     )
@@ -646,10 +646,15 @@ function pkgconfig_flags(path::AbstractString)
             fields[name] = _expand_pc(value, vars, path)
         end
     end
-    cflags = _pc_shell_split(get(fields, "Cflags", ""), path)
+    # Insert the literal directory after splitting so its shell metacharacters
+    # survive in both quoted and unquoted variable references.
+    split_flags(field) = map(_pc_shell_split(get(fields, field, ""), path)) do flag
+        replace(flag, "\${pcfiledir}" => dirname(abspath(path)))
+    end
+    cflags = split_flags("Cflags")
     libs = vcat(
-        _pc_shell_split(get(fields, "Libs", ""), path),
-        _pc_shell_split(get(fields, "Libs.private", ""), path)
+        split_flags("Libs"),
+        split_flags("Libs.private")
     )
     _refuse_bare_pc_flags(path, cflags)
     _refuse_bare_pc_flags(path, libs)
