@@ -91,17 +91,32 @@ public:
     static const FUID cid;
 protected:
     void addParams() SMTG_OVERRIDE {
+#ifdef AP_TEST_EXTRA_PARAMS
+        for (ParamID i = 1; i < 8; i++)
+            parameters.addParameter(new RangeParameter(STR16("Extra"), i, STR16(""), 0.0, 4.0, 0.0,
+                                                       0, ParameterInfo::kCanAutomate));
+#endif
         parameters.addParameter(new RangeParameter(STR16("Gain"), 0, STR16(""), 0.0, 4.0, 1.0,
                                                    0, ParameterInfo::kCanAutomate));
     }
     void onParam(ParamID id, ParamValue v) SMTG_OVERRIDE {
         if (id == 0) gain = (float)(4.0 * v);
+#ifdef AP_TEST_EXTRA_PARAMS
+        if (id > 0 && id < 8) extra[id - 1] = (float)(4.0 * v);
+#endif
         setParamNormalized(id, v);
     }
     void run(int32, const float *x, float *y, int32 n) SMTG_OVERRIDE {
-        for (int32 i = 0; i < n; i++) y[i] = x[i] * gain;
+        float g = gain;
+#ifdef AP_TEST_EXTRA_PARAMS
+        for (int i = 0; i < 7; i++) g += extra[i];
+#endif
+        for (int32 i = 0; i < n; i++) y[i] = x[i] * g;
     }
     float gain = 1.0f;
+#ifdef AP_TEST_EXTRA_PARAMS
+    float extra[7] = {};
+#endif
 };
 
 class ApOnePole : public ApEffect {

@@ -1,7 +1,7 @@
 name = "AudioPlugins"
 uuid = "83119930-5344-4127-8689-15f5870d6d1a"
 authors = ["JuliaHub, Inc. and contributors"]
-version = "1.8.0"
+version = "1.9.0"
 
 [deps]
 CLAPHost_jll = "c9c4f589-041a-5a1c-a149-a4cdc6e5211b"
@@ -21,14 +21,14 @@ AudioPluginsJuliaCExt = "JuliaC"
 [compat]
 CLAPHost_jll = "1.2"
 JuliaC = "0.3"
-LV2Host_jll = "1.2"
+LV2Host_jll = "1.4"
 Libdl = "1"
 SafeTestsets = "0.1"
 SciMLTesting = "2.13"
 Scratch = "1"
 TOML = "1"
 Test = "1"
-VST3Host_jll = "1.2"
+VST3Host_jll = "1.4"
 julia = "1.10"
 vst3sdk_jll = "3.8"
 lv2_jll = "1.18"
