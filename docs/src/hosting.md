@@ -492,8 +492,7 @@ without changing the existing symbols. Handles are never reused, and stale
 or foreign block tokens are refused. Tokens are opaque: do not do arithmetic
 on them. Opening still happens driver-side, where bundle paths are strings.
 
-The instance ABI needs a `CLAPHost_jll` build from these C sources; the currently
-required 1.2 build does not provide it. Until that JLL is released and the
-compat floor updated, use the local-build preference described in [`clap_lib_path`](@ref). The
-`CLAPInstances` test group compiles the shipped sources directly so CI can
-exercise the new ABI before its JLL release.
+CLAPHost_jll 1.3 exports the instance ABI; the local-build preference described
+in [`clap_lib_path`](@ref) overrides it when developing `csrc/clap_host.c`
+itself. The `CLAPInstances` test group also compiles the shipped sources
+directly so CI exercises the same ABI the JLL provides.
