@@ -26,6 +26,13 @@ const VST3_BUNDLE = vst3_test_bundle(SDK; force = true)
             (:vst3, Vst3Instance, VST3_BUNDLE, :class_id, AudioPlugins.VST3_TEST_GAIN, 0.125),
         )
         api(name) = getfield(AudioPlugins, Symbol(format, "_", name))
+        host = Libdl.dlopen(api(:lib_path)())
+        has_instances = Libdl.dlsym_e(host, Symbol(format, "_host_open_instance")) != C_NULL
+        Libdl.dlclose(host)
+        if !has_instances
+            @test_throws ErrorException constructor(path; NamedTuple{(idkey,)}((id,))..., block_size = 32)
+            continue
+        end
         saved = Ref{Any}()
         constructor(path; NamedTuple{(idkey,)}((id,))..., block_size = 32) do instance
             saved[] = instance

@@ -21,7 +21,8 @@ is idempotent; a closed handle never names a later instance. Calls into the
 host must be serialized: instances may coexist, but parallel calls from
 multiple threads are not supported. Latency is reported, not compensated.
 
-Requires `LV2Host_jll` 1.4 or later; see [`lv2_lib_path`](@ref) for the development override.
+Requires a host library built from the accompanying C sources with the
+instance API; see [`lv2_lib_path`](@ref) for the development override.
 """
 struct Lv2Instance
     handle::Float64

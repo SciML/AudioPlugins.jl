@@ -535,9 +535,9 @@ handles return `NaN` (or zero for validity readers). Closing one instance, scann
 or opening the default plugin leaves its peers usable. Latency is reported
 without compensation.
 
-These APIs require `LV2Host_jll` and `VST3Host_jll` 1.4 or later. Development
-builds of those JLLs must provide the instance ABI. The path preferences described
-in [`lv2_lib_path`](@ref) and [`vst3_lib_path`](@ref) select locally built libraries.
-The `OfflineInstances` test group exercises the exported constructors using the
-selected JLLs and also builds hosts from source against the JLL-provided lilv and
-VST3 SDK dependencies.
+These APIs require a host library built from the accompanying C sources with
+the instance ABI. The path preferences described in [`lv2_lib_path`](@ref) and
+[`vst3_lib_path`](@ref) select locally built libraries. The `OfflineInstances`
+test group exercises the instance ABI against hosts built from source with the
+JLL-provided lilv and VST3 SDK dependencies, and exercises the exported
+constructors against the selected JLL libraries when they export that ABI.
