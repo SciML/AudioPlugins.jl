@@ -7,6 +7,7 @@ using SciMLTesting
 run_tests(;
     core = joinpath(@__DIR__, "clap_host_tests.jl"),
     groups = Dict(
+        "OfflineInstances" => joinpath(@__DIR__, "offline_instances_tests.jl"),
         "CLAPInstances" => joinpath(@__DIR__, "clap_instances_tests.jl"),
         "Live" => joinpath(@__DIR__, "live_tests.jl"),
         "CLAPLive" => joinpath(@__DIR__, "clap_live_tests.jl"),

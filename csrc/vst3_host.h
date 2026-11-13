@@ -160,6 +160,57 @@ VST3_HOST_API double vst3_out_peak(double dep);
 VST3_HOST_API double vst3_out_count(double dep);
 VST3_HOST_API double vst3_out_valid(double dep);
 
+/* Independent instances: serialize host calls. Handles are never reused;
+ * source/output tokens belong to one instance and one current block.
+ * Copy requires matching rate, block size and host channels. Queued parameters
+ * apply at offset zero; the process call's explicit slots take precedence. */
+VST3_HOST_API const char *vst3_host_plugin_name_for(double handle);
+VST3_HOST_API const char *vst3_host_plugin_id_for(double handle);
+VST3_HOST_API long vst3_host_n_params_for(double handle);
+VST3_HOST_API double vst3_host_param_id_for(double handle, long i);
+VST3_HOST_API double vst3_host_param_min_for(double handle, long i);
+VST3_HOST_API double vst3_host_param_max_for(double handle, long i);
+VST3_HOST_API double vst3_host_param_default_for(double handle, long i);
+VST3_HOST_API double vst3_host_param_default_normalized_for(double handle, long i);
+VST3_HOST_API double vst3_host_param_steps_for(double handle, long i);
+VST3_HOST_API double vst3_host_param_is_readonly_for(double handle, long i);
+VST3_HOST_API double vst3_host_param_is_bypass_for(double handle, long i);
+VST3_HOST_API const char *vst3_host_param_name_for(double handle, long i);
+VST3_HOST_API const char *vst3_host_param_units_for(double handle, long i);
+VST3_HOST_API double vst3_host_param_plain_for(double handle, double param_id, double normalized);
+VST3_HOST_API double vst3_host_param_normalized_for(double handle, double param_id, double plain);
+VST3_HOST_API double vst3_host_param_value_for(double handle, double param_id);
+VST3_HOST_API double vst3_host_latency_for(double handle);
+VST3_HOST_API double vst3_host_sample_rate_for(double handle);
+VST3_HOST_API double vst3_host_block_size_for(double handle);
+VST3_HOST_API double vst3_host_channels_for(double handle);
+VST3_HOST_API double vst3_host_is_open_for(double handle);
+VST3_HOST_API long   vst3_host_n_process_for(double handle);
+VST3_HOST_API long   vst3_host_n_restart_requests_for(double handle);
+VST3_HOST_API long   vst3_host_n_plugin_edits_for(double handle);
+VST3_HOST_API void vst3_host_reset_counters_for(double handle);
+VST3_HOST_API double vst3_in_fill_for(double handle, const double *samples, long n, long channels);
+VST3_HOST_API double vst3_in_tone_for(double handle, double t, double waveform, double freq, double amp);
+VST3_HOST_API double vst3_in_sample_for(double handle, double dep, double i, double ch);
+VST3_HOST_API double vst3_process_for(double handle, double dep,
+                    double id0, double v0, double id1, double v1,
+                    double id2, double v2, double id3, double v3);
+VST3_HOST_API double vst3_out_sample_for(double handle, double dep, double i, double ch);
+VST3_HOST_API double vst3_out_rms_for(double handle, double dep);
+VST3_HOST_API double vst3_out_peak_for(double handle, double dep);
+VST3_HOST_API double vst3_out_count_for(double handle, double dep);
+VST3_HOST_API double vst3_out_valid_for(double handle, double dep);
+VST3_HOST_API double vst3_host_n_audio_in_for(double handle);
+VST3_HOST_API double vst3_host_n_audio_out_for(double handle);
+VST3_HOST_API long vst3_host_open_index_for(double handle);
+VST3_HOST_API double vst3_host_open_instance(const char *path, const char *id, double rate, double block, double channels);
+VST3_HOST_API void vst3_host_close_instance(double handle);
+VST3_HOST_API double vst3_set_param(double dep, double id, double value);
+VST3_HOST_API double vst3_set_param_for(double handle, double dep, double id, double value);
+VST3_HOST_API double vst3_expect(double dep, double index);
+VST3_HOST_API double vst3_expect_for(double handle, double dep, double index);
+VST3_HOST_API double vst3_in_copy_for(double destination, double source, double dep);
+
 #ifdef __cplusplus
 }
 #endif

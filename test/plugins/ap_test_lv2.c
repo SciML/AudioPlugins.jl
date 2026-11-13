@@ -20,6 +20,9 @@ typedef struct {
     const float *ctrl, *in, *in1, *side;
     float *out;
     float *latency;
+#ifdef AP_TEST_EXTRA_PARAMS
+    const float *extra[7];
+#endif
     float  state;                /* one-pole memory */
     float  delay[LOOKAHEAD];     /* lookahead ring */
     int    pos;
@@ -40,7 +43,11 @@ static void connect_ctrl_in_out(LV2_Handle h, uint32_t port, void *data) {
     case 0: s->ctrl = (const float *)data; break;
     case 1: s->in   = (const float *)data; break;
     case 2: s->out  = (float *)data; break;
+#ifdef AP_TEST_EXTRA_PARAMS
+    default: if (port >= 3 && port < 10) s->extra[port - 3] = (const float *)data; break;
+#else
     default: break;
+#endif
     }
 }
 static void activate_reset(LV2_Handle h) {
@@ -56,6 +63,9 @@ static void run_gain(LV2_Handle h, uint32_t n) {
     inst_t *s = (inst_t *)h;
     if (!s->in || !s->out) return;
     float g = s->ctrl ? *s->ctrl : 1.0f;
+#ifdef AP_TEST_EXTRA_PARAMS
+    for (int i = 0; i < 7; i++) if (s->extra[i]) g += *s->extra[i];
+#endif
     for (uint32_t i = 0; i < n; i++) s->out[i] = s->in[i] * g;
 }
 

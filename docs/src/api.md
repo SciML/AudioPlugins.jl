@@ -350,3 +350,7 @@ AudioPlugins.runtime_layout
 AudioPlugins.pkgconfig_flags
 AudioPlugins.julia_step_header
 ```
+
+## Independent LV2 and VST3 instances
+
+See the [independent instance API](instances.md) for constructors and scalar operators.

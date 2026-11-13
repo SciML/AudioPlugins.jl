@@ -222,6 +222,57 @@ double lv2_out_peak(double dep);
 double lv2_out_count(double dep);
 double lv2_out_valid(double dep);
 
+/* Independent instances: serialize host calls. Handles are never reused;
+ * source/output tokens belong to one instance and one current block.
+ * Copy requires matching rate, block size and host channels. Queued parameters
+ * apply at offset zero; the process call's explicit slots take precedence. */
+const char *lv2_host_plugin_name_for(double handle);
+const char *lv2_host_plugin_uri_for(double handle);
+long lv2_host_n_params_for(double handle);
+double lv2_host_param_id_for(double handle, long i);
+double lv2_host_param_min_for(double handle, long i);
+double lv2_host_param_max_for(double handle, long i);
+double lv2_host_param_default_for(double handle, long i);
+const char *lv2_host_param_name_for(double handle, long i);
+const char *lv2_host_param_symbol_for(double handle, long i);
+double lv2_host_param_value_for(double handle, double port_index);
+double lv2_host_port_value_for(double handle, double port_index);
+double lv2_host_n_atom_ports_for(double handle);
+double lv2_host_atom_port_index_for(double handle, double i);
+double lv2_host_atom_port_is_input_for(double handle, double i);
+double lv2_host_atom_port_midi_for(double handle, double i);
+double lv2_host_atom_port_size_for(double handle, double i);
+double lv2_host_latency_for(double handle);
+double lv2_host_n_audio_in_for(double handle);
+double lv2_host_n_audio_out_for(double handle);
+double lv2_host_sample_rate_for(double handle);
+double lv2_host_block_size_for(double handle);
+double lv2_host_channels_for(double handle);
+double lv2_host_is_open_for(double handle);
+long   lv2_host_n_process_for(double handle);
+void   lv2_host_reset_counters_for(double handle);
+double lv2_in_fill_for(double handle, const double *samples, long n, long channels);
+double lv2_in_tone_for(double handle, double t, double waveform, double freq, double amp);
+double lv2_in_sample_for(double handle, double dep, double i, double ch);
+double lv2_in_midi_for(double handle, double dep, double port, double frame,
+                   double b0, double b1, double b2);
+double lv2_process_for(double handle, double dep,
+                   double id0, double v0, double id1, double v1,
+                   double id2, double v2, double id3, double v3);
+double lv2_out_sample_for(double handle, double dep, double i, double ch);
+double lv2_out_rms_for(double handle, double dep);
+double lv2_out_peak_for(double handle, double dep);
+double lv2_out_count_for(double handle, double dep);
+double lv2_out_valid_for(double handle, double dep);
+long lv2_host_open_index_for(double handle);
+double lv2_host_open_instance(const char *path, const char *id, double rate, double block, double channels);
+void lv2_host_close_instance(double handle);
+double lv2_set_param(double dep, double id, double value);
+double lv2_set_param_for(double handle, double dep, double id, double value);
+double lv2_expect(double dep, double index);
+double lv2_expect_for(double handle, double dep, double index);
+double lv2_in_copy_for(double destination, double source, double dep);
+
 #ifdef __cplusplus
 }
 #endif

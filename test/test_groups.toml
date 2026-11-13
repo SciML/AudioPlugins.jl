@@ -76,3 +76,7 @@ os = ["ubuntu-latest", "macos-latest", "windows-latest"]
 [Live]
 versions = ["lts", "1"]
 os = ["ubuntu-latest", "macos-latest", "windows-latest"]
+
+[OfflineInstances]
+versions = ["lts", "1"]
+os = ["ubuntu-latest", "macos-latest", "windows-latest"]

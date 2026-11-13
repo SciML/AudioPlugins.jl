@@ -32,6 +32,7 @@ makedocs(
         "Collection API" => "collections_api.md",
         "Known limits" => "limits.md",
         "API" => "api.md",
+        "Instance API" => "instances.md",
     ]
 )
 
