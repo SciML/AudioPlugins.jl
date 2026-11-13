@@ -8,6 +8,8 @@ using AudioPlugins
 using JuliaC
 const AP = AudioPlugins
 
+include("pkgconfig_paths.jl")
+
 const FIX = joinpath(@__DIR__, "export")
 
 include(joinpath(FIX, "reference.jl"))
