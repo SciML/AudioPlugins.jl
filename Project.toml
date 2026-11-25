@@ -21,7 +21,7 @@ AudioPluginsJuliaCExt = "JuliaC"
 [compat]
 CLAPHost_jll = "~1.2"
 JuliaC = "0.3"
-LV2Host_jll = "1.2"
+LV2Host_jll = "~1.2"
 Libdl = "1"
 SafeTestsets = "0.1"
 SciMLTesting = "2.13"
