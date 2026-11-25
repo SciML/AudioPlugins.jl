@@ -26,13 +26,13 @@ if Sys.iswindows()
         host = Libdl.dlopen(IC.CLAP_LIB)
         try
             for symbol in (
-                :clap_host_scan,
-                :clap_host_open,
-                :clap_host_last_error,
-                :clap_process,
-                :clap_host_open_instance,
-                :clap_process_for,
-            )
+                    :clap_host_scan,
+                    :clap_host_open,
+                    :clap_host_last_error,
+                    :clap_process,
+                    :clap_host_open_instance,
+                    :clap_process_for,
+                )
                 @test Libdl.dlsym(host, symbol) != C_NULL
             end
         finally
