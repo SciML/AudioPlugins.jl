@@ -2,7 +2,7 @@
 
 julia_version = "1.13.4"
 manifest_format = "2.1"
-project_hash = "167f7831169c1140194e60189e0ea519bfaeb7bd"
+project_hash = "ed9fe1273e96d7044129de13f0f504307cc2b6dc"
 
 [[deps.ANSIColoredPrinters]]
 git-tree-sha1 = "574baf8110975760d391c710b6341da1afa48d8c"
@@ -39,7 +39,7 @@ version = "1.11.0"
 
 [[deps.AudioPlugins]]
 deps = ["CLAPHost_jll", "LV2Host_jll", "Libdl", "Scratch", "TOML", "VST3Host_jll", "lv2_jll"]
-path = "/home/runner/work/AudioPlugins.jl/AudioPlugins.jl"
+path = "/home/runner/_work/AudioPlugins.jl/AudioPlugins.jl"
 uuid = "83119930-5344-4127-8689-15f5870d6d1a"
 version = "1.8.1"
 
@@ -208,10 +208,10 @@ version = "1.2.35+0"
 
 [[deps.LV2Host_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Lilv_jll"]
-git-tree-sha1 = "a93dd9ebdd07bddc891b053fcbb852e2bd72a265"
+git-tree-sha1 = "5a8babd02686f152a7d73f1bb22c203f8ebc1bf7"
 registries = "General"
 uuid = "a1fb6e78-af1d-557a-bd91-b38940fc92f3"
-version = "1.3.0+2"
+version = "1.2.0+0"
 
 [[deps.LazilyInitializedFields]]
 git-tree-sha1 = "0f2da712350b020bc3957f269c9caad516383ee0"
