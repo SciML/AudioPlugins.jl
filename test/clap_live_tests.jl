@@ -2,6 +2,7 @@ using Test, AudioPlugins
 
 @testset "experimental CLAP live sessions" begin
     @test !live_available(; library = joinpath(mktempdir(), "missing.so"))
+    @test live_available()
     if Sys.islinux()
         mktempdir() do dir
             root = dirname(@__DIR__)
@@ -70,7 +71,5 @@ using Test, AudioPlugins
             end
             @test !isopen(saved[])
         end
-    else
-        @test live_available()
     end
 end
