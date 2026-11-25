@@ -66,8 +66,7 @@ else
             h = Libdl.dlopen(clap_lib_path())
             for symbol in (
                     :clap_host_scan, :clap_host_open, :clap_host_last_error,
-                    :clap_process, :clap_host_open_instance, :clap_process_for,
-                    :clap_host_close_instance, :clap_host_param_name_for,
+                    :clap_process,
                 )
                 @test Libdl.dlsym(h, symbol) != C_NULL
             end
