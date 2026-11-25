@@ -71,6 +71,6 @@ using Test, AudioPlugins
             @test !isopen(saved[])
         end
     else
-        @test !live_available()
+        @test live_available()
     end
 end
