@@ -39,6 +39,12 @@
 #ifndef CLAP_HOST_H
 #define CLAP_HOST_H
 
+#if defined(_WIN32) && defined(CLAP_HOST_BUILD)
+#define CLAP_HOST_API __declspec(dllexport)
+#else
+#define CLAP_HOST_API
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -82,21 +88,21 @@ extern "C" {
  * resolve the clap_entry symbol, check ABI compatibility, and cache the
  * factory's descriptors. Returns the plugin count, or -1 on failure (see
  * clap_host_last_error). Safe to call again. */
-long clap_host_scan(const char *path);
+CLAP_HOST_API long clap_host_scan(const char *path);
 
 /* How many plugins the last successful scan found, without rescanning.
  * 0 before the first scan and after one that failed. */
-long clap_host_scan_count(void);
+CLAP_HOST_API long clap_host_scan_count(void);
 
 /* Descriptor fields of the i-th plugin from the last successful scan, or
  * "" when i is out of range. Driver-side only -- these are strings.
  * `id` and `name` are mandatory in CLAP; the rest are optional and come
  * back "" when the plugin leaves them unset. */
-const char *clap_host_scan_id(long i);
-const char *clap_host_scan_name(long i);
-const char *clap_host_scan_vendor(long i);
-const char *clap_host_scan_version(long i);
-const char *clap_host_scan_description(long i);
+CLAP_HOST_API const char *clap_host_scan_id(long i);
+CLAP_HOST_API const char *clap_host_scan_name(long i);
+CLAP_HOST_API const char *clap_host_scan_vendor(long i);
+CLAP_HOST_API const char *clap_host_scan_version(long i);
+CLAP_HOST_API const char *clap_host_scan_description(long i);
 
 /* The i-th plugin's CLAP feature keywords -- "audio-effect", "reverb",
  * "stereo" and so on, the list a host indexes and classifies by. How many
@@ -104,8 +110,8 @@ const char *clap_host_scan_description(long i);
  * A plugin declaring more than CLAP_HOST_MAX_FEATURES keeps the first
  * CLAP_HOST_MAX_FEATURES: these are classification hints, and no plugin
  * needs a dozen of them to say what it is. */
-long        clap_host_scan_n_features(long i);
-const char *clap_host_scan_feature(long i, long k);
+CLAP_HOST_API long        clap_host_scan_n_features(long i);
+CLAP_HOST_API const char *clap_host_scan_feature(long i, long k);
 
 /* Instantiate and activate. `plugin_id` selects from the bundle; pass ""
  * or NULL for the first plugin. `block_size` is the exact number of frames
@@ -129,24 +135,24 @@ const char *clap_host_scan_feature(long i, long k);
  * that is not first. A plugin without clap.audio-ports has, per the
  * extension's own definition, no audio ports: it is handed none.
  * Returns 0 on success, non-zero on failure (see clap_host_last_error). */
-int clap_host_open(const char *path, const char *plugin_id,
+CLAP_HOST_API int clap_host_open(const char *path, const char *plugin_id,
                    double sample_rate, double block_size, double channels);
 
 /* Deactivate, destroy, dlclose. Safe when nothing is open. */
-void clap_host_close(void);
+CLAP_HOST_API void clap_host_close(void);
 
 /* Human-readable reason for the last failure, or "" if none. */
-const char *clap_host_last_error(void);
+CLAP_HOST_API const char *clap_host_last_error(void);
 
 /* Which plugin is loaded, or "" -- for logs and for a driver that wants to
  * assert it opened what it meant to. */
-const char *clap_host_plugin_name(void);
+CLAP_HOST_API const char *clap_host_plugin_name(void);
 
 /* Its index within the descriptor list of the bundle that was scanned to
  * open it, or -1 when nothing is open. The node-side counterpart is
  * clap_expect(), which is how a model built against one plugin refuses to
  * process through another. */
-long clap_host_open_index(void);
+CLAP_HOST_API long clap_host_open_index(void);
 
 /* ------------------------------------------------------------------ *
  * Parameter discovery. The ids are what the node passes to
@@ -155,17 +161,17 @@ long clap_host_open_index(void);
  * own parameters with nothing to keep in sync driver-side.
  * ------------------------------------------------------------------ */
 
-long   clap_host_n_params(void);
-double clap_host_param_id(long i);       /* -1 when i is out of range */
-double clap_host_param_min(long i);
-double clap_host_param_max(long i);
-double clap_host_param_default(long i);
-const char *clap_host_param_name(long i);  /* driver-side: a string */
+CLAP_HOST_API long   clap_host_n_params(void);
+CLAP_HOST_API double clap_host_param_id(long i);       /* -1 when i is out of range */
+CLAP_HOST_API double clap_host_param_min(long i);
+CLAP_HOST_API double clap_host_param_max(long i);
+CLAP_HOST_API double clap_host_param_default(long i);
+CLAP_HOST_API const char *clap_host_param_name(long i);  /* driver-side: a string */
 
 /* The plugin's own value for a parameter right now, by id. NaN for an
  * unknown id. Reads through CLAP_EXT_PARAMS, so it reflects what the
  * plugin believes rather than what was last sent. */
-double clap_host_param_value(double param_id);
+CLAP_HOST_API double clap_host_param_value(double param_id);
 
 /* Latency the plugin reports, in samples (0 when it reports none, or when
  * it does not implement CLAP_EXT_LATENCY).
@@ -175,26 +181,26 @@ double clap_host_param_value(double param_id);
  * samples relative to the input. Compensating it means delaying the dry
  * path by the same amount, which needs a delay line this host does not
  * have; a model that cares must read this and align downstream itself. */
-double clap_host_latency(void);
+CLAP_HOST_API double clap_host_latency(void);
 
 /* Configuration actually in force, so a test or a driver can assert it
  * rather than assume it. */
-double clap_host_sample_rate(void);
-double clap_host_block_size(void);
-double clap_host_channels(void);
-double clap_host_is_open(void);
+CLAP_HOST_API double clap_host_sample_rate(void);
+CLAP_HOST_API double clap_host_block_size(void);
+CLAP_HOST_API double clap_host_channels(void);
+CLAP_HOST_API double clap_host_is_open(void);
 
 /* Audio channels the open plugin declares, summed across its ports in each
  * direction -- the `channels` open was given is the host side of the
  * mapping, these are the plugin side, and only the main port of each is
  * actually routed. 0 for a plugin without clap.audio-ports. */
-double clap_host_n_audio_in(void);
-double clap_host_n_audio_out(void);
+CLAP_HOST_API double clap_host_n_audio_in(void);
+CLAP_HOST_API double clap_host_n_audio_out(void);
 
 /* process() calls since the plugin was opened. The tests assert exactly
  * one per tick. */
-long clap_host_n_process(void);
-void clap_host_reset_counters(void);
+CLAP_HOST_API long clap_host_n_process(void);
+CLAP_HOST_API void clap_host_reset_counters(void);
 
 /* ------------------------------------------------------------------ *
  * The input block. Driver-side filling for tests and for a source that
@@ -205,13 +211,13 @@ void clap_host_reset_counters(void);
 
 /* Fill the input block from caller-supplied interleaved samples and
  * return its token. `n` is per channel. Driver-side. */
-double clap_in_fill(const double *samples, long n, long channels);
+CLAP_HOST_API double clap_in_fill(const double *samples, long n, long channels);
 
 /* Generate a block of a waveform ending at source time `t`, and return
  * its token: waveform is a CLAP_WAVE_* code, freq in Hz, amp in [0,1].
  * Every argument is a number, so a test can state the expected output in
  * closed form. Node-side callable. */
-double clap_in_tone(double t, double waveform, double freq, double amp);
+CLAP_HOST_API double clap_in_tone(double t, double waveform, double freq, double amp);
 
 #define CLAP_WAVE_SILENCE 0
 #define CLAP_WAVE_SINE    1
@@ -221,7 +227,7 @@ double clap_in_tone(double t, double waveform, double freq, double amp);
 
 /* Read the input block back: `i` is a sample index within the block,
  * `ch` a channel. NaN when `dep` does not name the current input block. */
-double clap_in_sample(double dep, double i, double ch);
+CLAP_HOST_API double clap_in_sample(double dep, double i, double ch);
 
 /* ------------------------------------------------------------------ *
  * The node-side operator. One equation, one call.
@@ -245,7 +251,7 @@ double clap_in_sample(double dep, double i, double ch);
  *
  * Returns NaN when nothing is open or when `dep` does not name the current
  * input block. */
-double clap_process(double dep,
+CLAP_HOST_API double clap_process(double dep,
                     double id0, double v0, double id1, double v1,
                     double id2, double v2, double id3, double v3);
 
@@ -266,23 +272,23 @@ double clap_process(double dep,
  * `id` is not a parameter the open plugin declares, when `value` is NaN, or
  * when the queue is full. Filling a new input block abandons whatever chain
  * was pending, so a refused chain cannot leak into the next block. */
-double clap_set_param(double dep, double id, double value);
+CLAP_HOST_API double clap_set_param(double dep, double id, double value);
 
 /* Return `dep` when the plugin at descriptor `index` of the scanned bundle
  * is the one open, and NaN otherwise -- the guard a generated per-plugin
  * component puts in front of its parameter chain, so that a model built for
  * one effect refuses rather than silently processing through whichever
  * effect the driver happened to open. NaN in, NaN out. */
-double clap_expect(double dep, double index);
+CLAP_HOST_API double clap_expect(double dep, double index);
 
 /* Read the output block. NaN when `dep` does not name the current output
  * block, which is what makes a stale token a visible error rather than a
  * plausible-looking wrong answer. */
-double clap_out_sample(double dep, double i, double ch);
-double clap_out_rms(double dep);
-double clap_out_peak(double dep);
-double clap_out_count(double dep);
-double clap_out_valid(double dep);
+CLAP_HOST_API double clap_out_sample(double dep, double i, double ch);
+CLAP_HOST_API double clap_out_rms(double dep);
+CLAP_HOST_API double clap_out_peak(double dep);
+CLAP_HOST_API double clap_out_count(double dep);
+CLAP_HOST_API double clap_out_valid(double dep);
 
 /* ------------------------------------------------------------------ *
  * CLAP_HOST_REALTIME -- the one place the contract does not line up.
@@ -317,46 +323,46 @@ double clap_out_valid(double dep);
  * Discovery remains on the default instance; each open caches its own
  * descriptors. Module initialization is shared until the last user closes.
  */
-double clap_host_open_instance(const char *path, const char *plugin_id,
+CLAP_HOST_API double clap_host_open_instance(const char *path, const char *plugin_id,
                                double sample_rate, double block_size, double channels);
-void clap_host_close_instance(double handle);
+CLAP_HOST_API void clap_host_close_instance(double handle);
 
 /* Copy a current output block into another instance's input and return its
  * input token. Requires matching sample rate, block size and host channels;
  * refuses stale output or incompatible configurations with NaN. No latency
  * compensation is performed. Filling abandons pending parameter events just
  * like clap_in_fill. source == destination is allowed for block feedback. */
-double clap_in_copy_for(double destination, double source, double dep);
+CLAP_HOST_API double clap_in_copy_for(double destination, double source, double dep);
 
-const char * clap_host_plugin_name_for(double handle);
-long clap_host_open_index_for(double handle);
-long clap_host_n_params_for(double handle);
-double clap_host_param_id_for(double handle, long i);
-double clap_host_param_min_for(double handle, long i);
-double clap_host_param_max_for(double handle, long i);
-double clap_host_param_default_for(double handle, long i);
-const char * clap_host_param_name_for(double handle, long i);
-double clap_host_param_value_for(double handle, double param_id);
-double clap_host_latency_for(double handle);
-double clap_host_sample_rate_for(double handle);
-double clap_host_block_size_for(double handle);
-double clap_host_channels_for(double handle);
-double clap_host_is_open_for(double handle);
-double clap_host_n_audio_in_for(double handle);
-double clap_host_n_audio_out_for(double handle);
-long clap_host_n_process_for(double handle);
-void clap_host_reset_counters_for(double handle);
-double clap_in_fill_for(double handle, const double *samples, long n, long channels);
-double clap_in_tone_for(double handle, double t, double waveform, double freq, double amp);
-double clap_in_sample_for(double handle, double dep, double i, double ch);
-double clap_process_for(double handle, double dep, double id0, double v0, double id1, double v1, double id2, double v2, double id3, double v3);
-double clap_set_param_for(double handle, double dep, double id, double value);
-double clap_expect_for(double handle, double dep, double index);
-double clap_out_sample_for(double handle, double dep, double i, double ch);
-double clap_out_rms_for(double handle, double dep);
-double clap_out_peak_for(double handle, double dep);
-double clap_out_count_for(double handle, double dep);
-double clap_out_valid_for(double handle, double dep);
+CLAP_HOST_API const char * clap_host_plugin_name_for(double handle);
+CLAP_HOST_API long clap_host_open_index_for(double handle);
+CLAP_HOST_API long clap_host_n_params_for(double handle);
+CLAP_HOST_API double clap_host_param_id_for(double handle, long i);
+CLAP_HOST_API double clap_host_param_min_for(double handle, long i);
+CLAP_HOST_API double clap_host_param_max_for(double handle, long i);
+CLAP_HOST_API double clap_host_param_default_for(double handle, long i);
+CLAP_HOST_API const char * clap_host_param_name_for(double handle, long i);
+CLAP_HOST_API double clap_host_param_value_for(double handle, double param_id);
+CLAP_HOST_API double clap_host_latency_for(double handle);
+CLAP_HOST_API double clap_host_sample_rate_for(double handle);
+CLAP_HOST_API double clap_host_block_size_for(double handle);
+CLAP_HOST_API double clap_host_channels_for(double handle);
+CLAP_HOST_API double clap_host_is_open_for(double handle);
+CLAP_HOST_API double clap_host_n_audio_in_for(double handle);
+CLAP_HOST_API double clap_host_n_audio_out_for(double handle);
+CLAP_HOST_API long clap_host_n_process_for(double handle);
+CLAP_HOST_API void clap_host_reset_counters_for(double handle);
+CLAP_HOST_API double clap_in_fill_for(double handle, const double *samples, long n, long channels);
+CLAP_HOST_API double clap_in_tone_for(double handle, double t, double waveform, double freq, double amp);
+CLAP_HOST_API double clap_in_sample_for(double handle, double dep, double i, double ch);
+CLAP_HOST_API double clap_process_for(double handle, double dep, double id0, double v0, double id1, double v1, double id2, double v2, double id3, double v3);
+CLAP_HOST_API double clap_set_param_for(double handle, double dep, double id, double value);
+CLAP_HOST_API double clap_expect_for(double handle, double dep, double index);
+CLAP_HOST_API double clap_out_sample_for(double handle, double dep, double i, double ch);
+CLAP_HOST_API double clap_out_rms_for(double handle, double dep);
+CLAP_HOST_API double clap_out_peak_for(double handle, double dep);
+CLAP_HOST_API double clap_out_count_for(double handle, double dep);
+CLAP_HOST_API double clap_out_valid_for(double handle, double dep);
 
 #ifdef __cplusplus
 }

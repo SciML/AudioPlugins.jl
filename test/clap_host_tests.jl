@@ -64,7 +64,13 @@ else
             @test isfile(clap_lib_path())
             @test !startswith(clap_lib_path(), pkgdir(AudioPlugins))
             h = Libdl.dlopen(clap_lib_path())
-            @test Libdl.dlsym(h, :clap_process) != C_NULL
+            for symbol in (
+                    :clap_host_scan, :clap_host_open, :clap_host_last_error,
+                    :clap_process, :clap_host_open_instance, :clap_process_for,
+                    :clap_host_close_instance, :clap_host_param_name_for,
+                )
+                @test Libdl.dlsym(h, symbol) != C_NULL
+            end
             Libdl.dlclose(h)
             # The sources still ship, for a standalone C program to link.
             @test isfile(clap_src_path())

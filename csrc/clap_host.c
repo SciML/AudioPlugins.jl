@@ -9,6 +9,7 @@
  * keep it.
  */
 
+#define CLAP_HOST_BUILD 1
 #include "clap_host.h"
 #include "vendor/clap/clap.h"
 
