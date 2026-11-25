@@ -1,6 +1,7 @@
 # Test the instance ABI against the shipped C sources, independently of the
 # CLAPHost_jll release cycle. The ordinary Core group tests the installed JLL.
 using Test
+using Libdl
 using AudioPlugins
 
 module SourceClapInstances
@@ -10,7 +11,8 @@ module SourceClapInstances
     const CLAP_LIB = joinpath(HOST_DIR, "libclap_host.$dlext")
     let cc = AudioPlugins._c_compiler(), src = AudioPlugins.clap_src_path()
         dl = Sys.islinux() ? ["-ldl"] : String[]
-        run(`$cc $(AudioPlugins._c_arch_flags()) -std=gnu99 -O2 -fPIC -shared -Wall -Wextra -o $CLAP_LIB $src $dl -lm`)
+        exports = Sys.iswindows() ? ["-Wl,--exclude-all-symbols"] : String[]
+        run(`$cc $(AudioPlugins._c_arch_flags()) -std=gnu99 -O2 -fPIC -shared -Wall -Wextra $exports -o $CLAP_LIB $src $dl -lm`)
     end
     clap_last_error() = unsafe_string(ccall((:clap_host_last_error, CLAP_LIB), Cstring, ()))
     include(joinpath(@__DIR__, "..", "src", "clap_instances.jl"))
@@ -18,6 +20,26 @@ end
 
 const IC = SourceClapInstances
 const INSTANCE_BUNDLE = clap_test_bundle(; force = true)
+
+if Sys.iswindows()
+    @testset "source-built CLAP host exports" begin
+        host = Libdl.dlopen(IC.CLAP_LIB)
+        try
+            for symbol in (
+                :clap_host_scan,
+                :clap_host_open,
+                :clap_host_last_error,
+                :clap_process,
+                :clap_host_open_instance,
+                :clap_process_for,
+            )
+                @test Libdl.dlsym(host, symbol) != C_NULL
+            end
+        finally
+            Libdl.dlclose(host)
+        end
+    end
+end
 
 @testset "concurrently hosted CLAP effects" begin
     gain = IC.ClapInstance(INSTANCE_BUNDLE; plugin_id = "ap.gain", block_size = 32, channels = 2)
