@@ -10,7 +10,7 @@ ZamPlugins = "322054b8-bd02-4d02-941a-4d0914a9b96b"
 
 [sources]
 Airwindows = {path = "../lib/Airwindows"}
-AudioPlugins = {path = "/home/runner/work/AudioPlugins.jl/AudioPlugins.jl"}
+AudioPlugins = {path = "/home/runner/_work/AudioPlugins.jl/AudioPlugins.jl"}
 DragonflyReverb = {path = "../lib/DragonflyReverb"}
 LSPPlugins = {path = "../lib/LSPPlugins"}
 X42Plugins = {path = "../lib/X42Plugins"}
