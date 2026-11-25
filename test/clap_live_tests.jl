@@ -1,8 +1,7 @@
-using Test, AudioPlugins, CLAPHost_jll
+using Test, AudioPlugins
 
 @testset "experimental CLAP live sessions" begin
     @test !live_available(; library = joinpath(mktempdir(), "missing.so"))
-    @test live_available() == (Base.pkgversion(CLAPHost_jll) >= v"1.3")
     if Sys.islinux()
         mktempdir() do dir
             root = dirname(@__DIR__)
@@ -71,5 +70,7 @@ using Test, AudioPlugins, CLAPHost_jll
             end
             @test !isopen(saved[])
         end
+    else
+        @test !live_available()
     end
 end
