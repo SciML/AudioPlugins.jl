@@ -124,22 +124,20 @@ without changing the existing symbols. Handles are never reused, and stale
 or foreign block tokens are refused. Tokens are opaque: do not do arithmetic
 on them. Opening still happens driver-side, where bundle paths are strings.
 
-The instance ABI needs a `CLAPHost_jll` build from these C sources; the currently
-required 1.2 build does not provide it. Until that JLL is released and the
-compat floor updated, use the local-build preference described above. The
-`CLAPInstances` test group compiles the shipped sources directly so CI can
-exercise the new ABI before its JLL release.
+CLAPHost_jll 1.3 exports the instance ABI; the local-build preference described
+above overrides it when developing `csrc/clap_host.c` itself. The
+`CLAPInstances` test group also compiles the shipped sources directly so CI
+exercises the same ABI the JLL provides.
 
 ## Experimental native live hosting
 
-The source-built live engine supports **CLAP, LV2, and VST3**, with isolated
+The native live engine supports **CLAP, LV2, and VST3**, with isolated
 sessions, bounded audio/event queues, and native timer or playback/capture
 drivers. Linux, macOS, and Windows platform code supplies control dispatch and
 optional realtime priority. [`docs/src/live.md`](docs/src/live.md) documents
-building, device selection, lifecycle rules, supported layouts, and limits.
-The released JLLs remain supported; live mode currently requires an explicit
-source-built library. Cross-platform CI, physical-device validation, and JLL
-publication gate the general release for issue #8.
+device selection, lifecycle rules, supported layouts, and limits. The default
+`library` is the registered host JLL (CLAPHost/LV2Host/VST3Host 1.3), which
+exports the live ABI; `library` accepts another live-capable build.
 
 ## Plugin collections
 

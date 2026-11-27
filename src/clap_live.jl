@@ -82,9 +82,10 @@ end
 """
     live_available(; library = clap_lib_path(), format = :clap)
 
-Whether `library` supplies experimental live ABI version 1 for `format`. Returns
-false with the currently released JLL. No new JLL version is required to load
-AudioPlugins; pass a source-built native live library to opt in.
+Whether `library` supplies live ABI version 1 for `format`. The default is the
+registered host JLL for `format` (CLAPHost_jll, LV2Host_jll, or VST3Host_jll,
+version 1.3), which exports the live ABI; pass another `library` to check a
+different build.
 """
 function live_available(; format::Symbol = :clap, library::AbstractString = _live_library(format))
     format in (:clap, :lv2, :vst3) || return false
@@ -165,8 +166,9 @@ buffer. Its transport queues grow independently of `queue_blocks`, up to 1024
 blocks; unsupported buffer sizes fail to open. Missing or late output is silence
 and counted separately in [`device_stats`](@ref).
 
-The currently released JLL lacks this ABI: pass an explicit source-built
-`library`. Calls must stay on Julia thread 1. The do-block always stops and
+`library` defaults to the registered host JLL for `format` (version 1.3), which
+exports the live ABI; pass another live-capable library to override. Calls must
+stay on Julia thread 1. The do-block always stops and
 closes; otherwise use `stop!` and `close` in `finally`. Service [`poll!`](@ref)
 regularly for plugin main-thread callbacks. No finite queue or priority setting
 guarantees deadlines for arbitrary plugin code. Use plugins whose processing
@@ -188,7 +190,7 @@ function open_live(
     level === nothing && throw(ArgumentError("priority must be :normal, :best_effort, or :strict"))
     config = _LiveConfig(sample_rate, block_size, channels, queue_blocks, driver == :device ? 2 : 0, level - 1)
     bundle, id = format == :clap ? _resolve_plugin(path, plugin_id) : (String(path), String(plugin_id))
-    live_available(; library, format) || error("Live ABI v1 for $format unavailable; build the native live host and pass library")
+    live_available(; library, format) || error("Live ABI v1 for $format unavailable in $library; the registered host JLL provides it from version 1.3, or pass a live-capable library")
     lib = dlopen(library, RTLD_NOW | RTLD_LOCAL)
     handle = Ref{Ptr{Cvoid}}(C_NULL)
     try
@@ -360,14 +362,14 @@ refreshed after processing each block. This query invokes no plugin
 method while audio runs. Queueing and device latency are excluded, and no
 latency compensation is performed.
 
-Requires the optional `ap_live_get_latency` symbol in the source-built library.
+Requires the optional `ap_live_get_latency` symbol in the live library.
 Older live ABI v1 libraries remain usable but do not support this query. After
 a plugin restart request, close and reopen to renegotiate the configuration.
 """
 function live_latency(session::ClapLiveSession)
     _live_check(session)
     query = dlsym(session.library, :ap_live_get_latency; throw_error = false)
-    query === nothing && error("AudioPlugins live latency unavailable; rebuild csrc/clap_live.c")
+    query === nothing && error("AudioPlugins live latency unavailable; the loaded library does not export ap_live_get_latency")
     frames = Ref{UInt32}()
     _live_result(ccall(query, Cint, (Ptr{Cvoid}, Ref{UInt32}), session.handle, frames))
     return frames[]

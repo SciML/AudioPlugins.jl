@@ -3,13 +3,14 @@
 The native live engine implements the direction approved in
 [issue #8](https://github.com/SciML/AudioPlugins.jl/issues/8#issuecomment-5956165702).
 It has isolated CLAP, LV2, and VST3 adapters, a timer driver, and native device
-playback/capture for Linux, macOS, and Windows. This is a source-built development
-API. The released JLLs still lack it; loading AudioPlugins with them remains
-supported. Binary publication and physical-device validation are release gates.
+playback/capture for Linux, macOS, and Windows. The default `library` is the
+registered host JLL (CLAPHost, LV2Host, or VST3Host 1.3), which exports the
+live ABI; `library` accepts another live-capable build.
 
-## Build
+## Building from source
 
-The CMake build uses vendored CLAP/LV2 headers and miniaudio 0.11.23 (MIT-0;
+Building the engine by hand is only needed to develop `csrc/`; the JLLs already
+ship it. The CMake build uses vendored CLAP/LV2 headers and miniaudio 0.11.23 (MIT-0;
 see `csrc/vendor/PROVENANCE.md`). LV2 additionally links lilv. VST3 requires a
 built MIT-licensed SDK 3.8 or later. Specify its include tree and library folder:
 
@@ -42,9 +43,8 @@ cc -std=c11 -O2 -fPIC -shared -o /tmp/libclap_live.so \
 ```julia
 using AudioPlugins
 
-library = "/absolute/path/to/libaudioplugins_live.so"
 bundle = clap_test_bundle()
-open_live(bundle; plugin_id = "ap.gain", library,
+open_live(bundle; plugin_id = "ap.gain",  # library defaults to CLAPHost_jll
           channels = 2, block_size = 64) do session
     input = ones(Float32, 128) # interleaved stereo
     output = similar(input)
@@ -186,18 +186,9 @@ Linux probes also run address/undefined/thread sanitizers and 32-bit builds.
 Allocation guards check the linked host path; they cannot certify allocations
 inside arbitrary shared-library plugins.
 
-Before a general binary release, require passing CI for supported targets and
-physical playback/capture checks (including unplug/replug) on each native
-backend. After the source merges, pin the Yggdrasil host recipes to that commit,
-build and register the JLLs, then raise compatibility floors and make live mode
-available from those artifacts. The source PR does not publish a v2 release or
-claim completion of hardware validation.
-
-The prepared recipe update is `contrib/yggdrasil/live-hosts.patch`. From a clean
-Yggdrasil checkout, apply it with `git apply --check` followed by `git apply`.
-Set `AUDIOPLUGINS_LIVE_COMMIT` to the full merged AudioPlugins source commit
-before building each recipe. The proposed JLL versions are 1.3.0; the patch adds
-live symbols to each existing host library, installs the public headers, retains
-the offline ABI, and includes the miniaudio licence. It deliberately requires
-an explicit commit instead of shipping a moving branch. BinaryBuilder builds
-and artifact registration must precede a Julia compatibility-floor change.
+The host JLLs are built from a pinned AudioPlugins commit by the Yggdrasil
+recipes
+[CLAPHost](https://github.com/JuliaPackaging/Yggdrasil/blob/master/C/CLAPHost/build_tarballs.jl),
+[LV2Host](https://github.com/JuliaPackaging/Yggdrasil/blob/master/L/LV2Host/build_tarballs.jl),
+and
+[VST3Host](https://github.com/JuliaPackaging/Yggdrasil/blob/master/V/VST3Host/build_tarballs.jl).
