@@ -64,7 +64,12 @@ else
             @test isfile(clap_lib_path())
             @test !startswith(clap_lib_path(), pkgdir(AudioPlugins))
             h = Libdl.dlopen(clap_lib_path())
-            @test Libdl.dlsym(h, :clap_process) != C_NULL
+            for symbol in (
+                    :clap_host_scan, :clap_host_open, :clap_host_last_error,
+                    :clap_process,
+                )
+                @test Libdl.dlsym(h, symbol) != C_NULL
+            end
             Libdl.dlclose(h)
             # The sources still ship, for a standalone C program to link.
             @test isfile(clap_src_path())
@@ -72,6 +77,29 @@ else
             # The test bundle is built into a scratch space, not into the package.
             @test !startswith(BUNDLE, pkgdir(AudioPlugins))
             @test (@test_deprecated build_clap_host!()) == clap_lib_path()
+        end
+
+        @testset "prebuilt instance ABI" begin
+            host = Libdl.dlopen(clap_lib_path())
+            try
+                @test (Libdl.dlsym_e(host, :clap_host_open_instance) != C_NULL) ==
+                    (pkgversion(AP.CLAPHost_jll) >= v"1.3")
+            finally
+                Libdl.dlclose(host)
+            end
+            # The 1.2 compatibility floor provides singleton hosting; 1.3 adds instances.
+            if pkgversion(AP.CLAPHost_jll) >= v"1.3"
+                saved = Ref{ClapInstance}()
+                ClapInstance(BUNDLE; plugin_id = "ap.gain", block_size = 32, channels = 1) do gain
+                    saved[] = gain
+                    @test clap_is_open(gain)
+                    input = repeat([0.5, -1.0], 16)
+                    token = clap_fill!(gain, input)
+                    result = AP.clp_process(gain, token, 0, 0.25, -1, 0, -1, 0, -1, 0)
+                    @test clap_out(gain, result) == repeat([0.125, -0.25], 16)
+                end
+                @test !clap_is_open(saved[])
+            end
         end
 
         @testset "the bundle builds and enumerates" begin
